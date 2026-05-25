@@ -32,6 +32,7 @@ function Get-BarColor { param([double]$pct)
 
 function Get-SantiagoTime {
     param([string]$iso)
+    if ([string]::IsNullOrWhiteSpace($iso)) { return $null }
     $dto = [datetimeoffset]::Parse($iso)
     $tz  = [System.TimeZoneInfo]::FindSystemTimeZoneById("Pacific SA Standard Time")
     return [System.TimeZoneInfo]::ConvertTime($dto, $tz)
@@ -67,12 +68,16 @@ while ($true) {
         if ($d.five_hour) {
             $p5   = [double]$d.five_hour.utilization
             $rst5 = Get-SantiagoTime $d.five_hour.resets_at
-            $remMin = ([datetimeoffset]::Parse($d.five_hour.resets_at) - $now).TotalMinutes
-            $rh = [math]::Floor($remMin / 60); $rm = [math]::Floor($remMin % 60)
             Write-Host "  Sesion (5h)" -ForegroundColor Cyan
             Write-Host "  Uso       " -NoNewline
             Draw-Bar -pct $p5 -color (Get-BarColor $p5)
-            Write-Host ("  Restablece: {0}  ({1}h {2}m restantes)" -f $rst5.ToString("HH:mm"), $rh, $rm) -ForegroundColor Gray
+            if ($rst5) {
+                $remMin = ([datetimeoffset]::Parse($d.five_hour.resets_at) - $now).TotalMinutes
+                $rh = [math]::Floor($remMin / 60); $rm = [math]::Floor($remMin % 60)
+                Write-Host ("  Restablece: {0}  ({1}h {2}m restantes)" -f $rst5.ToString("HH:mm"), $rh, $rm) -ForegroundColor Gray
+            } else {
+                Write-Host "  Sin sesion activa" -ForegroundColor Gray
+            }
             Write-Host ""
         }
 
@@ -95,7 +100,9 @@ while ($true) {
                 Write-Host "  Opus      " -NoNewline
                 Draw-Bar -pct $po -color (Get-BarColor $po)
             }
-            Write-Host ("  Restablece: {0}" -f $rst7.ToString("ddd dd MMM HH:mm")) -ForegroundColor Gray
+            if ($rst7) {
+                Write-Host ("  Restablece: {0}" -f $rst7.ToString("ddd dd MMM HH:mm")) -ForegroundColor Gray
+            }
         }
     } catch {
         $msg = $_.Exception.Message
