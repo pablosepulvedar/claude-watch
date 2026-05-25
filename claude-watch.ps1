@@ -9,6 +9,10 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 $CredPath  = Join-Path $env:USERPROFILE ".claude\.credentials.json"
 $UsageUrl  = "https://api.anthropic.com/api/oauth/usage"
 $ShowCcusage = $true   # poner $false para ocultar la seccion de volumen/costo (mas rapido)
+# Cada cuanto refrescar (segundos). El endpoint de /usage se bloquea si lo
+# llamas muy seguido: 30s (=120/h) gatilla bloqueos. 300s (=12/h) es seguro.
+# Minimo recomendado ~120s. A mas alto, mas seguro.
+$RefreshSeconds = 300
 
 $host.UI.RawUI.WindowTitle = "Claude Watch"
 try { $host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(64, 34) } catch {}
@@ -126,6 +130,6 @@ while ($true) {
 
     Write-Host ""
     Write-Host ("=" * 62) -ForegroundColor DarkGray
-    Write-Host "  Actualiza en 30s  (Ctrl+C para salir)" -ForegroundColor DarkGray
-    Start-Sleep -Seconds 30
+    Write-Host ("  Actualiza en {0}s  (Ctrl+C para salir)" -f $RefreshSeconds) -ForegroundColor DarkGray
+    Start-Sleep -Seconds $RefreshSeconds
 }
