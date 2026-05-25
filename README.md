@@ -1,149 +1,118 @@
 # Claude Watch
 
-Monitor de uso de tokens de Claude Code en tiempo real para Windows.
+Monitor de uso de Claude Code en tiempo real para Windows.
 
-Muestra en una ventana de PowerShell, actualizada cada 30 segundos:
-
-- **Barra de tiempo** del bloque activo de 5h (cuánto llevás / cuánto queda)
-- **Barra de tokens output** del bloque (estimado según plan Pro)
-- Hora aproximada de restablecimiento (zona horaria Santiago, Chile)
-- Tokens output y costo estimado de la sesión
-- Proyección de tokens al final del bloque
-- **Barra semanal** de tokens output de los últimos 7 días
+Muestra en una ventana de PowerShell, actualizada cada 30 segundos, **los mismos porcentajes que `/usage`** dentro de Claude Code — porque lee de la misma fuente oficial.
 
 ```
-  Claude Code Usage  [14:23:07]
-============================================================
+  Claude Code Usage  [13:58:22]
+==============================================================
 
-  Sesion actual (5h)
-  Tiempo   [###############-------------------------] 34%
-  Tokens   [########################################] 91%
-  2h 50m usados  /  5h 10m restantes
-  Restablece: ~19:30  (aprox, ver /usage)
-  Output: 260,194  /  ~286,000   Costo: $0.00
-  Proyect: 285,000 tokens  /  $0.00
+  Plan: max  (default_claude_max_20x)
 
-  Semana actual (7 dias)
-  Tokens   [##########------------------------------] 24%
-  Output: 91,000  /  ~382,000   Costo: $0.00
+  Sesion (5h)
+  Uso       [###-------------------------------------] 7%
+  Restablece: 18:19  (4h 21m restantes)
 
-============================================================
+  Semana (7 dias)
+  Todos     [###################---------------------] 47%
+  Sonnet    [####################--------------------] 49%
+  Restablece: vie 29 may. 07:00
+
+--------------------------------------------------------------
+  Volumen (ccusage, equivalente API - NO es tu factura)
+  Sesion: 71.125 out  /  ~$18,52
+  Semana: 71.125 out  /  ~$403,05
+
+==============================================================
   Actualiza en 30s  (Ctrl+C para salir)
 ```
 
 ---
 
-## Requisitos
+## Cómo funciona
 
-- Windows con PowerShell 5.1+ (viene incluido en Windows 10/11)
-- [Node.js](https://nodejs.org/) instalado (para `npx`)
-- [Claude Code](https://claude.ai/code) instalado y haber iniciado al menos una sesión
+A diferencia de herramientas que estiman el uso contando tokens, Claude Watch consulta el **endpoint real** que usa el comando `/usage`:
+
+```
+GET https://api.anthropic.com/api/oauth/usage
+```
+
+Se autentica con tu token OAuth, que Claude Code ya guarda localmente en `~/.claude/.credentials.json`. Por eso:
+
+- **Los porcentajes coinciden exactamente con `/usage`.** No hay que adivinar ni calibrar límites.
+- **Se adapta solo a tu plan.** Funciona igual en plan `max`, `pro`, etc. Muestra automáticamente los sub-límites que tu plan tenga (semana global, Sonnet, Opus); los que no apliquen simplemente no aparecen.
+- **No cuesta nada ni gasta cupo.** Es un endpoint de solo lectura de estadísticas; consultarlo no consume tokens ni genera cargos (igual que mirar `/usage`).
+
+La sección **"Volumen (ccusage)"** es opcional y solo informativa: muestra cuántos tokens moviste y su costo *equivalente en la API de pago por uso* — **no es tu factura** (estás en suscripción). Se puede desactivar.
+
+> El endpoint no está documentado oficialmente; se descubrió inspeccionando Claude Code. Funciona hoy, pero podría cambiar en una actualización. Si eso pasa, el script lo maneja con gracia (muestra un aviso y sigue corriendo).
 
 ---
 
-## Instalación
+## Requisitos
 
-### 1. Clonar o descargar
+- **Windows** con PowerShell 5.1+ (incluido en Windows 10/11).
+- **Claude Code** instalado y con **sesión iniciada al menos una vez** (para que exista `~/.claude/.credentials.json`).
+- **Node.js** — *solo* si querés la sección de volumen/costo (usa `npx ccusage`). El bloque de porcentajes reales funciona sin Node.
+
+---
+
+## Instalación (también en otro PC / otra cuenta)
+
+El script lee las credenciales de **la máquina y cuenta donde se ejecuta**, así que mostrará automáticamente el uso de quien esté logueado en Claude Code en ese equipo — sin configurar nada.
+
+### 1. Asegurate de estar logueado en Claude Code
+
+En ese PC, abrí Claude Code al menos una vez (o corré `claude` y autenticá). Eso crea `~/.claude/.credentials.json`. Verificá:
+
+```powershell
+Test-Path "$env:USERPROFILE\.claude\.credentials.json"   # debe dar True
+```
+
+### 2. Clonar
 
 ```powershell
 git clone https://github.com/pablosepulvedar/claude-watch.git
 cd claude-watch
 ```
 
-O bien descargá solo el archivo `claude-watch.ps1` directamente.
-
-### 2. Instalar ccusage (una sola vez)
+### 3. (Opcional) Instalar ccusage para la sección de volumen
 
 ```powershell
 npm install -g ccusage
 ```
 
-Verificá que funcione:
+Si no querés esa sección, abrí `claude-watch.ps1` y poné `$ShowCcusage = $false` cerca del inicio. Así no necesita Node y carga más rápido.
+
+### 4. Ejecutar
 
 ```powershell
-npx ccusage blocks --active --json
-```
-
-Deberías ver un JSON. Si no hay sesión activa, `blocks` estará vacío — eso es normal.
-
-### 3. Ejecutar
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "C:\ruta\a\claude-watch.ps1"
-```
-
-O si ya estás en PowerShell:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\claude-watch.ps1
+powershell -ExecutionPolicy Bypass -File ".\claude-watch.ps1"
 ```
 
 Para salir: **Ctrl+C**
 
 ---
 
-## Iniciar automáticamente con Windows
+## Configuración
 
-### Opción A — Acceso directo en Inicio (recomendada, sin admin)
-
-1. Presioná `Win + R`, escribí `shell:startup`, Enter
-2. Dentro de esa carpeta, creá un nuevo archivo de texto con extensión `.bat`:
-
-```bat
-@echo off
-start "Claude Watch" powershell -WindowStyle Normal -ExecutionPolicy Bypass -File "C:\Users\TU_USUARIO\claude-watch.ps1"
-```
-
-Cambiá `TU_USUARIO` y la ruta al archivo `.ps1`. Al iniciar Windows, se abre la ventana automáticamente.
-
-### Opción B — Tarea programada (más control)
+Las opciones están al inicio de `claude-watch.ps1`:
 
 ```powershell
-$action  = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument '-WindowStyle Normal -ExecutionPolicy Bypass -File "C:\ruta\claude-watch.ps1"'
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -TaskName "ClaudeWatch" -Action $action -Trigger $trigger -RunLevel Limited
+$CredPath    = Join-Path $env:USERPROFILE ".claude\.credentials.json"  # ruta a credenciales
+$ShowCcusage = $true   # $false oculta la seccion de volumen/costo (no necesita Node)
 ```
 
----
+### Zona horaria
 
-## Ajustar los límites
-
-Si tu plan tiene límites distintos, editá las dos primeras líneas del script:
-
-```powershell
-$SessionOutputLimit = 286000   # tokens output por bloque de 5h
-$WeeklyOutputLimit  = 382000   # tokens output por semana
-```
-
-Para saber los tuyos: en Claude Code escribí `/usage` y fijate qué porcentaje aparece cuando tenés tokens conocidos. Dividí tokens / porcentaje × 100.
-
----
-
-## Cómo iniciar en cualquier sesión de Claude
-
-Cada vez que arrancás a trabajar con Claude Code, simplemente abrí una ventana de PowerShell aparte y ejecutá:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Users\TU_USUARIO\claude-watch.ps1"
-```
-
-Podés tenerlo minimizado o en un monitor secundario. Se actualiza solo cada 30 segundos.
-
-**Nota:** la hora de restablecimiento es aproximada (ccusage usa bloques fijos de hora en hora). Para ver la hora exacta usá `/usage` dentro de Claude Code.
-
----
-
-## Zona horaria
-
-El script muestra la hora de restablecimiento en **hora de Santiago (Chile)**. Para cambiarla a tu zona editá esta línea:
+Las horas de restablecimiento se muestran en **hora de Santiago (Chile)**. Para tu zona, editá:
 
 ```powershell
 $tz = [System.TimeZoneInfo]::FindSystemTimeZoneById("Pacific SA Standard Time")
 ```
 
-Reemplazá el ID por el de tu zona. Para ver todos los disponibles:
+Para ver los IDs disponibles:
 
 ```powershell
 [System.TimeZoneInfo]::GetSystemTimeZones() | Select-Object Id, DisplayName
@@ -151,13 +120,57 @@ Reemplazá el ID por el de tu zona. Para ver todos los disponibles:
 
 ---
 
-## Dependencias
+## Iniciar automáticamente con Windows
 
-| Herramienta | Qué hace |
-|------------|---------|
-| `ccusage` | Lee los logs locales de Claude Code (`~/.claude/projects/`) y expone datos de bloques y semanas |
-| PowerShell 5.1 | Viene con Windows 10/11, no necesita instalación extra |
+### Opción A — Carpeta de Inicio (recomendada, sin admin)
+
+1. `Win + R` → `shell:startup` → Enter.
+2. Creá ahí un archivo `.bat`:
+
+```bat
+@echo off
+start "Claude Watch" powershell -WindowStyle Normal -ExecutionPolicy Bypass -File "C:\Users\TU_USUARIO\claude-watch\claude-watch.ps1"
+```
+
+Ajustá la ruta. Al iniciar sesión en Windows, se abre la ventana sola.
+
+### Opción B — Tarea programada
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument '-WindowStyle Normal -ExecutionPolicy Bypass -File "C:\Users\TU_USUARIO\claude-watch\claude-watch.ps1"'
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "ClaudeWatch" -Action $action -Trigger $trigger -RunLevel Limited
+```
 
 ---
 
-Hecho para monitorear el plan **Pro** de Claude Code. Adaptable a cualquier plan ajustando los límites.
+## Seguridad
+
+El script lee tu token OAuth desde `~/.claude/.credentials.json` **solo para autenticar la consulta a Anthropic**. El token no sale de tu equipo más que hacia `api.anthropic.com` (lo mismo que hace Claude Code). **No subas ese archivo a ningún repositorio.** El token expira periódicamente; Claude Code lo refresca al usarse y el script vuelve a leerlo en el siguiente ciclo (si caduca, muestra un aviso y se recupera solo).
+
+---
+
+## Solución de problemas
+
+| Síntoma | Causa / solución |
+|---|---|
+| `Token expirado` | Abrí Claude Code una vez para refrescar el token; el panel se recupera solo. |
+| `Error leyendo /usage` | Verificá conexión y que exista `.credentials.json`. |
+| No aparece la sección de volumen | Falta `ccusage`/Node, o `$ShowCcusage = $false`. Es opcional. |
+| Error de TLS | El script fuerza TLS 1.2; asegurate de usar PowerShell 5.1+. |
+| Horas de reset desfasadas | Cambiá la zona horaria (ver arriba). |
+
+---
+
+## Dependencias
+
+| Herramienta | Rol |
+|------------|-----|
+| PowerShell 5.1 | Motor del script. Incluido en Windows 10/11. |
+| Claude Code | Provee el token OAuth en `~/.claude/.credentials.json`. **Requerido.** |
+| `ccusage` (Node) | Solo para la sección de volumen/costo. **Opcional.** |
+
+---
+
+Funciona en cualquier plan de Claude Code (Pro, Max, etc.) — los porcentajes y sub-límites se detectan automáticamente desde el endpoint oficial.
