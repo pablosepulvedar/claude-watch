@@ -73,10 +73,12 @@ while ($true) {
             Draw-Bar -pct $p5 -color (Get-BarColor $p5)
             if ($rst5) {
                 $remMin = ([datetimeoffset]::Parse($d.five_hour.resets_at) - $now).TotalMinutes
+                # Si resets_at ya pasó hoy, el próximo reset es mañana a la misma hora
+                if ($remMin -lt 0 -and $remMin -gt -1440) { $remMin += 1440 }
                 if ($remMin -le 0) {
                     Write-Host ("  Restablece: {0}  (en curso)" -f $rst5.ToString("HH:mm")) -ForegroundColor Gray
                 } else {
-                    $rh = [math]::Floor($remMin / 60); $rm = [math]::Floor($remMin % 60)
+                    $rh = [math]::Floor($remMin / 60); $rm = [math]::Abs([math]::Floor($remMin % 60))
                     Write-Host ("  Restablece: {0}  ({1}h {2}m restantes)" -f $rst5.ToString("HH:mm"), $rh, $rm) -ForegroundColor Gray
                 }
             } else {
@@ -143,13 +145,14 @@ while ($true) {
     Write-Host ("=" * 62) -ForegroundColor DarkGray
 
     $deadline = (Get-Date).AddSeconds($RefreshSeconds)
-    $cursorY  = $host.UI.RawUI.CursorPosition.Y
+    # Primera línea del countdown (sin newline para poder sobreescribir con \r)
+    Write-Host ("  Actualiza en {0,3}s  (Ctrl+C salir  ·  R recargar)" -f $RefreshSeconds) -ForegroundColor DarkGray -NoNewline
 
     while ((Get-Date) -lt $deadline) {
-        $secs = [math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
-        try { $host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates(0, $cursorY) } catch {}
-        Write-Host ("  Actualiza en {0,3}s  (Ctrl+C salir  ·  R recargar)" -f $secs) -ForegroundColor DarkGray -NoNewline
         Start-Sleep -Milliseconds 500
+        $secs = [math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
+        # \r vuelve al inicio de la línea y sobreescribe sin bajar
+        Write-Host ("`r  Actualiza en {0,3}s  (Ctrl+C salir  ·  R recargar)" -f $secs) -ForegroundColor DarkGray -NoNewline
         if ($host.UI.RawUI.KeyAvailable) {
             $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
             if ($key.Character -eq 'r' -or $key.Character -eq 'R') { break }
