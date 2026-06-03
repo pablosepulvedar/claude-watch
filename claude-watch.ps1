@@ -73,8 +73,12 @@ while ($true) {
             Draw-Bar -pct $p5 -color (Get-BarColor $p5)
             if ($rst5) {
                 $remMin = ([datetimeoffset]::Parse($d.five_hour.resets_at) - $now).TotalMinutes
-                $rh = [math]::Floor($remMin / 60); $rm = [math]::Floor($remMin % 60)
-                Write-Host ("  Restablece: {0}  ({1}h {2}m restantes)" -f $rst5.ToString("HH:mm"), $rh, $rm) -ForegroundColor Gray
+                if ($remMin -le 0) {
+                    Write-Host ("  Restablece: {0}  (en curso)" -f $rst5.ToString("HH:mm")) -ForegroundColor Gray
+                } else {
+                    $rh = [math]::Floor($remMin / 60); $rm = [math]::Floor($remMin % 60)
+                    Write-Host ("  Restablece: {0}  ({1}h {2}m restantes)" -f $rst5.ToString("HH:mm"), $rh, $rm) -ForegroundColor Gray
+                }
             } else {
                 Write-Host "  Sin sesion activa" -ForegroundColor Gray
             }
