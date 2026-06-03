@@ -8,7 +8,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 
 $CredPath  = Join-Path $env:USERPROFILE ".claude\.credentials.json"
 $UsageUrl  = "https://api.anthropic.com/api/oauth/usage"
-$ShowCcusage = $true   # poner $false para ocultar la seccion de volumen/costo (mas rapido)
+$ShowCcusage = $false  # poner $true para mostrar seccion de volumen/costo (ccusage)
 # Cada cuanto refrescar (segundos). El endpoint de /usage se bloquea si lo
 # llamas muy seguido: 30s (=120/h) gatilla bloqueos. 300s (=12/h) es seguro.
 # Minimo recomendado ~120s. A mas alto, mas seguro.
