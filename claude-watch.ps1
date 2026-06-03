@@ -141,6 +141,19 @@ while ($true) {
 
     Write-Host ""
     Write-Host ("=" * 62) -ForegroundColor DarkGray
-    Write-Host ("  Actualiza en {0}s  (Ctrl+C para salir)" -f $RefreshSeconds) -ForegroundColor DarkGray
-    Start-Sleep -Seconds $RefreshSeconds
+
+    $deadline = (Get-Date).AddSeconds($RefreshSeconds)
+    $cursorY  = $host.UI.RawUI.CursorPosition.Y
+
+    while ((Get-Date) -lt $deadline) {
+        $secs = [math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
+        try { $host.UI.RawUI.CursorPosition = New-Object System.Management.Automation.Host.Coordinates(0, $cursorY) } catch {}
+        Write-Host ("  Actualiza en {0,3}s  (Ctrl+C salir  ·  R recargar)" -f $secs) -ForegroundColor DarkGray -NoNewline
+        Start-Sleep -Milliseconds 500
+        if ($host.UI.RawUI.KeyAvailable) {
+            $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            if ($key.Character -eq 'r' -or $key.Character -eq 'R') { break }
+        }
+    }
+    Write-Host ""
 }
