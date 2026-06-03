@@ -30,11 +30,13 @@ function Get-BarColor { param([double]$pct)
     if ($pct -gt 80) { "Red" } elseif ($pct -gt 60) { "Yellow" } else { "Green" }
 }
 
+# Zona horaria de Santiago, disponible en todo el script
+$tz = [System.TimeZoneInfo]::FindSystemTimeZoneById("Pacific SA Standard Time")
+
 function Get-SantiagoTime {
     param([string]$iso)
     if ([string]::IsNullOrWhiteSpace($iso)) { return $null }
     $dto = [datetimeoffset]::Parse($iso)
-    $tz  = [System.TimeZoneInfo]::FindSystemTimeZoneById("Pacific SA Standard Time")
     return [System.TimeZoneInfo]::ConvertTime($dto, $tz)
 }
 
@@ -73,12 +75,18 @@ while ($true) {
             Draw-Bar -pct $p5 -color (Get-BarColor $p5)
             if ($rst5) {
                 $remMin = ([datetimeoffset]::Parse($d.five_hour.resets_at) - $now).TotalMinutes
-                # Si resets_at ya pasó hoy, el próximo reset es mañana a la misma hora
-                if ($remMin -lt 0 -and $remMin -gt -1440) { $remMin += 1440 }
+                # Si la fecha del API es errónea (remMin muy negativo), recalculamos
+                # desde la hora correcta de $rst5 y la próxima ocurrencia en Santiago
+                if ($remMin -lt 0) {
+                    $nowSantiago = [System.TimeZoneInfo]::ConvertTime($now, $tz)
+                    $candidate   = $nowSantiago.DateTime.Date.Add($rst5.TimeOfDay)
+                    if ($candidate -le $nowSantiago.DateTime) { $candidate = $candidate.AddDays(1) }
+                    $remMin = ($candidate - $nowSantiago.DateTime).TotalMinutes
+                }
                 if ($remMin -le 0) {
                     Write-Host ("  Restablece: {0}  (en curso)" -f $rst5.ToString("HH:mm")) -ForegroundColor Gray
                 } else {
-                    $rh = [math]::Floor($remMin / 60); $rm = [math]::Abs([math]::Floor($remMin % 60))
+                    $rh = [math]::Floor($remMin / 60); $rm = [math]::Floor($remMin % 60)
                     Write-Host ("  Restablece: {0}  ({1}h {2}m restantes)" -f $rst5.ToString("HH:mm"), $rh, $rm) -ForegroundColor Gray
                 }
             } else {
