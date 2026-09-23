@@ -6,7 +6,33 @@
 # TLS 1.2 (Windows PowerShell 5.1 lo necesita para api.anthropic.com)
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
-$CredPath  = Join-Path $env:USERPROFILE ".claude\.credentials.json"
+# Desactiva "QuickEdit Mode" de la consola: si se selecciona texto (click/drag sin
+# querer) en la ventana, Windows pausa TODO el script hasta soltar/tocar una tecla,
+# rompiendo el auto-refresco cada $RefreshSeconds sin avisar.
+try {
+    Add-Type -Name Console -Namespace Win32Native -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+public static extern System.IntPtr GetStdHandle(int nStdHandle);
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+public static extern bool GetConsoleMode(System.IntPtr hConsoleHandle, out uint lpMode);
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+public static extern bool SetConsoleMode(System.IntPtr hConsoleHandle, uint dwMode);
+'@ -ErrorAction Stop
+    $STD_INPUT_HANDLE    = -10
+    $ENABLE_QUICK_EDIT   = 0x0040
+    $ENABLE_EXTENDED_FLAGS = 0x0080
+    $h = [Win32Native.Console]::GetStdHandle($STD_INPUT_HANDLE)
+    [uint32]$mode = 0
+    if ([Win32Native.Console]::GetConsoleMode($h, [ref]$mode)) {
+        $mode = ($mode -band (-bnot $ENABLE_QUICK_EDIT)) -bor $ENABLE_EXTENDED_FLAGS
+        [Win32Native.Console]::SetConsoleMode($h, $mode) | Out-Null
+    }
+} catch {}
+
+$Accounts = @(
+    @{ Label = "Personal"; CredPath = Join-Path $env:USERPROFILE ".claude\.credentials.json" }
+    @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json" }
+)
 $UsageUrl  = "https://api.anthropic.com/api/oauth/usage"
 $ShowCcusage = $false  # poner $true para mostrar seccion de volumen/costo (ccusage)
 # Cada cuanto refrescar (segundos). El endpoint de /usage se bloquea si lo
@@ -15,7 +41,7 @@ $ShowCcusage = $false  # poner $true para mostrar seccion de volumen/costo (ccus
 $RefreshSeconds = 300
 
 $host.UI.RawUI.WindowTitle = "Claude Watch"
-try { $host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(64, 34) } catch {}
+try { $host.UI.RawUI.WindowSize = New-Object System.Management.Automation.Host.Size(64, 48) } catch {}
 
 function Draw-Bar {
     param([double]$pct, [int]$width = 40, [string]$color = "Green")
@@ -41,6 +67,7 @@ function Get-SantiagoTime {
 }
 
 function Get-Usage {
+    param([string]$CredPath)
     $cred = Get-Content $CredPath -Raw | ConvertFrom-Json
     $tok  = $cred.claudeAiOauth.accessToken
     $headers = @{
@@ -51,17 +78,20 @@ function Get-Usage {
     return @{ data = $data; plan = $cred.claudeAiOauth.subscriptionType; tier = $cred.claudeAiOauth.rateLimitTier }
 }
 
-while ($true) {
-    Clear-Host
-    Write-Host ("  Claude Code Usage  [" + (Get-Date -Format "HH:mm:ss") + "]") -ForegroundColor Yellow
-    Write-Host ("=" * 62) -ForegroundColor DarkGray
-    Write-Host ""
+function Show-AccountUsage {
+    param([string]$Label, [string]$CredPath, [datetimeoffset]$Now)
 
-    # ----- Porcentajes REALES del plan (coinciden con /usage) -----
+    Write-Host ("  Cuenta: {0}" -f $Label) -ForegroundColor Magenta
+
+    if (-not (Test-Path $CredPath)) {
+        Write-Host "  (no configurada en esta maquina)" -ForegroundColor DarkGray
+        Write-Host ""
+        return
+    }
+
     try {
-        $u    = Get-Usage
-        $d    = $u.data
-        $now  = [datetimeoffset]::UtcNow
+        $u = Get-Usage -CredPath $CredPath
+        $d = $u.data
 
         Write-Host ("  Plan: {0}  ({1})" -f $u.plan, $u.tier) -ForegroundColor DarkCyan
         Write-Host ""
@@ -74,11 +104,9 @@ while ($true) {
             Write-Host "  Uso       " -NoNewline
             Draw-Bar -pct $p5 -color (Get-BarColor $p5)
             if ($rst5) {
-                $remMin = ([datetimeoffset]::Parse($d.five_hour.resets_at) - $now).TotalMinutes
-                # Si la fecha del API es errónea (remMin muy negativo), recalculamos
-                # desde la hora correcta de $rst5 y la próxima ocurrencia en Santiago
+                $remMin = ([datetimeoffset]::Parse($d.five_hour.resets_at) - $Now).TotalMinutes
                 if ($remMin -lt 0) {
-                    $nowSantiago = [System.TimeZoneInfo]::ConvertTime($now, $tz)
+                    $nowSantiago = [System.TimeZoneInfo]::ConvertTime($Now, $tz)
                     $candidate   = $nowSantiago.DateTime.Date.Add($rst5.TimeOfDay)
                     if ($candidate -le $nowSantiago.DateTime) { $candidate = $candidate.AddDays(1) }
                     $remMin = ($candidate - $nowSantiago.DateTime).TotalMinutes
@@ -102,13 +130,11 @@ while ($true) {
             Write-Host "  Semana (7 dias)" -ForegroundColor Cyan
             Write-Host "  Todos     " -NoNewline
             Draw-Bar -pct $p7 -color (Get-BarColor $p7)
-            # Sonnet (sub-limite separado), si aplica
             if ($d.seven_day_sonnet) {
                 $ps = [double]$d.seven_day_sonnet.utilization
                 Write-Host "  Sonnet    " -NoNewline
                 Draw-Bar -pct $ps -color (Get-BarColor $ps)
             }
-            # Opus (sub-limite separado), si aplica
             if ($d.seven_day_opus) {
                 $po = [double]$d.seven_day_opus.utilization
                 Write-Host "  Opus      " -NoNewline
@@ -121,10 +147,27 @@ while ($true) {
     } catch {
         $msg = $_.Exception.Message
         if ($msg -match "401|Unauthorized") {
-            Write-Host "  Token expirado. Abre Claude Code una vez para refrescarlo" -ForegroundColor Yellow
-            Write-Host "  y este panel se recupera solo en el proximo ciclo." -ForegroundColor DarkGray
+            Write-Host "  Token expirado. Abre esta cuenta en Claude Code una vez para refrescarlo." -ForegroundColor Yellow
         } else {
             Write-Host ("  Error leyendo /usage: {0}" -f $msg) -ForegroundColor Red
+        }
+    }
+    Write-Host ""
+}
+
+while ($true) {
+    Clear-Host
+    Write-Host ("  Claude Code Usage  [" + (Get-Date -Format "HH:mm:ss") + "]") -ForegroundColor Yellow
+    Write-Host ("=" * 62) -ForegroundColor DarkGray
+    Write-Host ""
+
+    # ----- Porcentajes REALES del plan (coinciden con /usage), por cuenta -----
+    $now = [datetimeoffset]::UtcNow
+    for ($i = 0; $i -lt $Accounts.Count; $i++) {
+        Show-AccountUsage -Label $Accounts[$i].Label -CredPath $Accounts[$i].CredPath -Now $now
+        if ($i -lt $Accounts.Count - 1) {
+            Write-Host ("  " + ("-" * 60)) -ForegroundColor DarkGray
+            Write-Host ""
         }
     }
 
@@ -161,9 +204,21 @@ while ($true) {
         $secs = [math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
         # \r vuelve al inicio de la línea y sobreescribe sin bajar
         Write-Host ("`r  Actualiza en {0,3}s  (Ctrl+C salir  ·  R recargar)" -f $secs) -ForegroundColor DarkGray -NoNewline
-        if ($host.UI.RawUI.KeyAvailable) {
-            $key = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-            if ($key.Character -eq 'r' -or $key.Character -eq 'R') { break }
+
+        # $host.UI.RawUI.KeyAvailable/ReadKey se cuelga bajo Windows Terminal (ConPTY) en
+        # algunos casos, congelando TODO el script. [Console]::KeyAvailable es mas
+        # confiable; si tambien falla, se deja de intentar leer teclas (el refresco por
+        # tiempo sigue funcionando igual, solo se pierde el atajo de "R para recargar").
+        if ($KeyCheckSupported -ne $false) {
+            try {
+                if ([Console]::KeyAvailable) {
+                    $key = [Console]::ReadKey($true)
+                    if ($key.KeyChar -eq 'r' -or $key.KeyChar -eq 'R') { break }
+                }
+                $KeyCheckSupported = $true
+            } catch {
+                $KeyCheckSupported = $false
+            }
         }
     }
     Write-Host ""
