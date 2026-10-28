@@ -33,6 +33,9 @@ $Accounts = @(
     @{ Label = "Personal"; CredPath = Join-Path $env:USERPROFILE ".claude\.credentials.json" }
     @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json" }
 )
+# Historial local de % semanal (una fila por refresco y cuenta) para calcular el ritmo de las ultimas 24h.
+# ponytail: crece ~1 MB/ano; borrar el archivo si molesta, solo se vuelve al promedio de la semana.
+$LogPath = Join-Path $PSScriptRoot "historial.csv"
 $UsageUrl  = "https://api.anthropic.com/api/oauth/usage"
 $ShowCcusage = $false  # poner $true para mostrar seccion de volumen/costo (ccusage)
 # Cada cuanto refrescar (segundos). El endpoint de /usage se bloquea si lo
@@ -64,6 +67,41 @@ function Get-SantiagoTime {
     if ([string]::IsNullOrWhiteSpace($iso)) { return $null }
     $dto = [datetimeoffset]::Parse($iso)
     return [System.TimeZoneInfo]::ConvertTime($dto, $tz)
+}
+
+function Show-WeekForecast {
+    param([string]$Label, [double]$Pct, [string]$ResetIso, [datetimeoffset]$Now)
+    $reset = [datetimeoffset]::Parse($ResetIso)
+    $start = $reset.AddDays(-7)
+    $key   = $reset.ToUniversalTime().ToString("yyyy-MM-ddTHH")
+    $nowT  = $Now.ToUnixTimeSeconds()
+    try { "{0},{1},{2},{3}" -f $nowT, $Label, $key, $Pct.ToString([cultureinfo]::InvariantCulture) | Add-Content $LogPath } catch {}
+
+    $hElap = ($Now - $start).TotalHours
+    $hRem  = ($reset - $Now).TotalHours
+    if ($hElap -lt 1 -or $hRem -le 0) { return }
+
+    # Ritmo por hora: ultimas 24h si hay historial, si no promedio desde que empezo la semana
+    $rate = $Pct / $hElap
+    if (Test-Path $LogPath) {
+        $ref = Import-Csv $LogPath -Header t, cuenta, semana, pct |
+            Where-Object { $_.cuenta -eq $Label -and $_.semana -eq $key -and [long]$_.t -le $nowT - 86400 } |
+            Select-Object -Last 1
+        if ($ref) { $rate = ($Pct - [double]$ref.pct) / (($nowT - [long]$ref.t) / 3600) }
+    }
+    $proj = $Pct + $rate * $hRem
+    $asi  = "as" + [char]0xED
+
+    Write-Host "  Tiempo    " -NoNewline
+    Draw-Bar -pct ($hElap / 168 * 100) -color DarkCyan
+    Write-Host "  Al reset  " -NoNewline
+    Draw-Bar -pct ([math]::Min(100, $proj)) -color $(if ($proj -ge 100) { "Red" } else { "Green" })
+    if ($proj -ge 100) {
+        $hit = [System.TimeZoneInfo]::ConvertTime($Now.AddHours((100 - $Pct) / $rate), $tz)
+        Write-Host ("  Si sigues {0}: se acaba el {1} a las {2}, antes del reset. Baja el ritmo." -f $asi, $hit.ToString("ddd dd"), $hit.ToString("HH:mm")) -ForegroundColor Red
+    } else {
+        Write-Host ("  Si sigues {0}: llegas al reset con ~{1:0}% (te sobra {2:0}%)" -f $asi, $proj, (100 - $proj)) -ForegroundColor Green
+    }
 }
 
 function Get-Usage {
@@ -142,6 +180,7 @@ function Show-AccountUsage {
             }
             if ($rst7) {
                 Write-Host ("  Restablece: {0}" -f $rst7.ToString("ddd dd MMM HH:mm")) -ForegroundColor Gray
+                Show-WeekForecast -Label $Label -Pct $p7 -ResetIso $d.seven_day.resets_at -Now $Now
             }
         }
     } catch {
@@ -164,6 +203,10 @@ while ($true) {
     # ----- Porcentajes REALES del plan (coinciden con /usage), por cuenta -----
     $now = [datetimeoffset]::UtcNow
     for ($i = 0; $i -lt $Accounts.Count; $i++) {
+        # Pausa entre cuentas para no disparar 2 requests casi simultaneos al
+        # mismo endpoint (algunos rate limits cortan por rafaga corta, no solo
+        # por promedio por hora).
+        if ($i -gt 0) { Start-Sleep -Seconds 5 }
         Show-AccountUsage -Label $Accounts[$i].Label -CredPath $Accounts[$i].CredPath -Now $now
         if ($i -lt $Accounts.Count - 1) {
             Write-Host ("  " + ("-" * 60)) -ForegroundColor DarkGray
