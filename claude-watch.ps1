@@ -81,26 +81,76 @@ function Show-WeekForecast {
     $hRem  = ($reset - $Now).TotalHours
     if ($hElap -lt 1 -or $hRem -le 0) { return }
 
-    # Ritmo por hora: ultimas 24h si hay historial, si no promedio desde que empezo la semana
+    $all = @()
+    if (Test-Path $LogPath) { $all = @(Import-Csv $LogPath -Header t, cuenta, semana, pct | Where-Object { $_.cuenta -eq $Label }) }
+    $week = @($all | Where-Object { $_.semana -eq $key })
+
+    # Ritmo reciente por hora: mira hacia atras tanto como falta para el reset (min 3h, max 24h);
+    # si el historial no alcanza, promedio desde que empezo la semana
     $rate = $Pct / $hElap
-    if (Test-Path $LogPath) {
-        $ref = Import-Csv $LogPath -Header t, cuenta, semana, pct |
-            Where-Object { $_.cuenta -eq $Label -and $_.semana -eq $key -and [long]$_.t -le $nowT - 86400 } |
-            Select-Object -Last 1
-        if ($ref) { $rate = ($Pct - [double]$ref.pct) / (($nowT - [long]$ref.t) / 3600) }
+    $win  = [math]::Min(24, [math]::Max(3, $hRem))
+    $ref  = $week | Where-Object { [long]$_.t -le $nowT - $win * 3600 } | Select-Object -Last 1
+    if ($ref) { $rate = ($Pct - [double]$ref.pct) / (($nowT - [long]$ref.t) / 3600) }
+
+    # Patron: % que subes en promedio cada (dia de semana, hora), aprendido de semanas anteriores.
+    # ponytail: una hora observada solo en parte cuenta como entera; con varias semanas se diluye.
+    $inc = @{}; $seen = @{}
+    for ($i = 1; $i -lt $all.Count; $i++) {
+        $p0 = $all[$i - 1]; $p1 = $all[$i]
+        if ($p1.semana -ne $p0.semana -or $p1.semana -eq $key) { continue }
+        if (([long]$p1.t - [long]$p0.t) -gt 1800) { continue }
+        $b = [System.TimeZoneInfo]::ConvertTime([datetimeoffset]::FromUnixTimeSeconds([long]$p1.t), $tz).ToString("ddd-HH")
+        $inc[$b] = [double]$inc[$b] + [math]::Max(0, [double]$p1.pct - [double]$p0.pct)
+        if (-not $seen[$b]) { $seen[$b] = @{} }
+        $seen[$b][$p1.semana] = 1
     }
-    $proj = $Pct + $rate * $hRem
-    $asi  = "as" + [char]0xED
+
+    # Proyeccion hora a hora hasta el reset: patron si esa hora ya se vio otra semana, si no el ritmo reciente
+    $proj = $Pct; $hit = $null; $hPat = 0.0
+    $tcur = $Now
+    while ($tcur -lt $reset) {
+        $tnext = [datetimeoffset]::new($tcur.UtcDateTime.Date.AddHours($tcur.UtcDateTime.Hour + 1), [timespan]::Zero)
+        if ($tnext -gt $reset) { $tnext = $reset }
+        $f = ($tnext - $tcur).TotalHours
+        $b = [System.TimeZoneInfo]::ConvertTime($tcur, $tz).ToString("ddd-HH")
+        if ($seen[$b]) { $step = $inc[$b] / $seen[$b].Count * $f; $hPat += $f } else { $step = $rate * $f }
+        if (-not $hit -and $proj + $step -ge 100) { $hit = $tcur.AddHours((100 - $proj) / $step * $f) }
+        $proj += $step
+        $tcur = $tnext
+    }
+    $base = if ($hPat -ge $hRem / 2) { "según tu patrón de semanas anteriores" } else { "según el ritmo de las últimas {0:0}h" -f $win }
 
     Write-Host "  Tiempo    " -NoNewline
     Draw-Bar -pct ($hElap / 168 * 100) -color DarkCyan
     Write-Host "  Al reset  " -NoNewline
     Draw-Bar -pct ([math]::Min(100, $proj)) -color $(if ($proj -ge 100) { "Red" } else { "Green" })
-    if ($proj -ge 100) {
-        $hit = [System.TimeZoneInfo]::ConvertTime($Now.AddHours((100 - $Pct) / $rate), $tz)
-        Write-Host ("  Si sigues {0}: se acaba el {1} a las {2}, antes del reset. Baja el ritmo." -f $asi, $hit.ToString("ddd dd"), $hit.ToString("HH:mm")) -ForegroundColor Red
+    if ($hit) {
+        $h = [System.TimeZoneInfo]::ConvertTime($hit, $tz)
+        Write-Host ("  Si sigues así: se acaba el {0} a las {1}, antes del reset. Baja el ritmo." -f $h.ToString("ddd dd"), $h.ToString("HH:mm")) -ForegroundColor Red
     } else {
-        Write-Host ("  Si sigues {0}: llegas al reset con ~{1:0}% (te sobra {2:0}%)" -f $asi, $proj, (100 - $proj)) -ForegroundColor Green
+        Write-Host ("  Si sigues así: llegas al reset con ~{0:0}% (te sobra {1:0}%)" -f $proj, (100 - $proj)) -ForegroundColor Green
+    }
+    Write-Host ("  ({0})" -f $base) -ForegroundColor DarkGray
+
+    # Uso por dia de esta semana (solo dias con historial)
+    $days = [ordered]@{}
+    foreach ($r in $week) {
+        $dk = [System.TimeZoneInfo]::ConvertTime([datetimeoffset]::FromUnixTimeSeconds([long]$r.t), $tz).ToString("ddd dd")
+        if (-not $days.Contains($dk)) { $days[$dk] = @([double]$r.pct, [double]$r.pct) }
+        $days[$dk][1] = [double]$r.pct
+    }
+    if ($days.Count -gt 0) {
+        $parts = @(); $prev = $null; $sum = 0.0; $n = 0
+        $today = [System.TimeZoneInfo]::ConvertTime($Now, $tz).ToString("ddd dd")
+        foreach ($dk in $days.Keys) {
+            $first, $last = $days[$dk]
+            $d = if ($null -ne $prev) { $last - $prev } else { $last - $first }
+            $parts += ("{0} +{1:0}%" -f $dk.Substring(0, 3), $d)
+            if ($null -ne $prev -and $dk -ne $today) { $sum += $d; $n++ }
+            $prev = $last
+        }
+        Write-Host ("  Por día   " + ($parts -join "  ")) -ForegroundColor Gray
+        if ($n -gt 0) { Write-Host ("  Promedio  {0:0.0}% por día completo" -f ($sum / $n)) -ForegroundColor Gray }
     }
 }
 
