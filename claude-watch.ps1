@@ -180,6 +180,45 @@ function Show-WeekForecast {
         Write-Host ("  Por día   " + ($parts -join "  ")) -ForegroundColor Gray
         if ($n -gt 0) { Write-Host ("  Promedio  {0:0.0}% por día completo" -f ($sum / $n)) -ForegroundColor Gray }
     }
+    Show-HourMap -All $all -Now $Now -Horario $Horario
+}
+
+function Show-HourMap {
+    # Mapa de calor de los ultimos 7 dias: una fila por dia, una columna por hora, color segun % usado en esa hora
+    param($All, [datetimeoffset]$Now, $Horario)
+    $h0 = 0; $h1 = 24
+    if ($Horario) { $h0 = $Horario.Desde; $h1 = $Horario.Hasta }
+    $cell = @{}
+    for ($i = 1; $i -lt $All.Count; $i++) {
+        $p0 = $All[$i - 1]; $p1 = $All[$i]
+        if ($p1.semana -ne $p0.semana) { continue }
+        $d = [double]$p1.pct - [double]$p0.pct
+        if ($d -le 0) { continue }
+        $k = [System.TimeZoneInfo]::ConvertTime([datetimeoffset]::FromUnixTimeSeconds([long]$p1.t), $tz).ToString("yyyy-MM-dd HH")
+        $cell[$k] = [double]$cell[$k] + $d
+    }
+    if ($cell.Count -eq 0) { return }
+
+    $hdr = ""
+    for ($h = $h0; $h -lt $h1; $h++) { $hdr += $(if (($h - $h0) % 2 -eq 0) { "{0:00}  " -f $h } else { "" }) }
+    Write-Host ""
+    Write-Host "  Uso por hora (% de la semana gastado en cada hora)" -ForegroundColor Cyan
+    Write-Host ("          " + $hdr) -ForegroundColor DarkGray
+    $today = [System.TimeZoneInfo]::ConvertTime($Now, $tz).Date
+    for ($k = 6; $k -ge 0; $k--) {
+        $day = $today.AddDays(-$k); $tot = 0.0
+        Write-Host ("  {0} {1}  " -f $day.ToString("ddd").Substring(0, 3), $day.ToString("dd")) -NoNewline -ForegroundColor Gray
+        for ($h = $h0; $h -lt $h1; $h++) {
+            $v = [double]$cell[$day.ToString("yyyy-MM-dd ") + ("{0:00}" -f $h)]; $tot += $v
+            if ($v -le 0)     { Write-Host "··" -NoNewline -ForegroundColor DarkGray }
+            elseif ($v -lt 1.5) { Write-Host "░░" -NoNewline -ForegroundColor Green }
+            elseif ($v -lt 2.5) { Write-Host "▒▒" -NoNewline -ForegroundColor Yellow }
+            elseif ($v -lt 3.5) { Write-Host "▓▓" -NoNewline -ForegroundColor DarkYellow }
+            else                { Write-Host "██" -NoNewline -ForegroundColor Red }
+        }
+        Write-Host $(if ($tot -gt 0) { "  +{0:0}%" -f $tot } else { "" }) -ForegroundColor Gray
+    }
+    Write-Host "          ·· nada  ░░ 1%  ▒▒ 2%  ▓▓ 3%  ██ 4%+" -ForegroundColor DarkGray
 }
 
 function Get-Usage {
