@@ -38,6 +38,8 @@ $Accounts = @(
 # Historial local de % semanal (una fila por refresco y cuenta) para calcular el ritmo de las ultimas 24h.
 # ponytail: crece ~1 MB/ano; borrar el archivo si molesta, solo se vuelve al promedio de la semana.
 $LogPath = Join-Path $PSScriptRoot "historial.csv"
+$ReportPath = Join-Path $PSScriptRoot "reporte.html"
+$TemplatePath = Join-Path $PSScriptRoot "reporte.template.html"
 $UsageUrl  = "https://api.anthropic.com/api/oauth/usage"
 $ShowCcusage = $false  # poner $true para mostrar seccion de volumen/costo (ccusage)
 # Cada cuanto refrescar (segundos). El endpoint de /usage se bloquea si lo
@@ -180,45 +182,22 @@ function Show-WeekForecast {
         Write-Host ("  Por día   " + ($parts -join "  ")) -ForegroundColor Gray
         if ($n -gt 0) { Write-Host ("  Promedio  {0:0.0}% por día completo" -f ($sum / $n)) -ForegroundColor Gray }
     }
-    Show-HourMap -All $all -Now $Now -Horario $Horario
 }
 
-function Show-HourMap {
-    # Mapa de calor de los ultimos 7 dias: una fila por dia, una columna por hora, color segun % usado en esa hora
-    param($All, [datetimeoffset]$Now, $Horario)
-    $h0 = 0; $h1 = 24
-    if ($Horario) { $h0 = $Horario.Desde; $h1 = $Horario.Hasta }
-    $cell = @{}
-    for ($i = 1; $i -lt $All.Count; $i++) {
-        $p0 = $All[$i - 1]; $p1 = $All[$i]
-        if ($p1.semana -ne $p0.semana) { continue }
-        $d = [double]$p1.pct - [double]$p0.pct
-        if ($d -le 0) { continue }
-        $k = [System.TimeZoneInfo]::ConvertTime([datetimeoffset]::FromUnixTimeSeconds([long]$p1.t), $tz).ToString("yyyy-MM-dd HH")
-        $cell[$k] = [double]$cell[$k] + $d
+function Write-Report {
+    # Genera reporte.html (graficos semanal/mensual/historico) desde historial.csv; se abre con la tecla I
+    $tpl = $TemplatePath
+    if (-not (Test-Path $tpl) -or -not (Test-Path $LogPath)) { return }
+    $last = @{}; $sb = New-Object System.Text.StringBuilder
+    foreach ($r in (Import-Csv $LogPath -Header t, cuenta, semana, pct)) {
+        $sig = $r.semana + "|" + $r.pct
+        if ($last[$r.cuenta] -eq $sig) { continue }
+        $last[$r.cuenta] = $sig
+        if ($sb.Length) { [void]$sb.Append(",") }
+        [void]$sb.AppendFormat('[{0},"{1}","{2}",{3}]', $r.t, $r.cuenta, $r.semana, $r.pct)
     }
-    if ($cell.Count -eq 0) { return }
-
-    $hdr = ""
-    for ($h = $h0; $h -lt $h1; $h++) { $hdr += $(if (($h - $h0) % 2 -eq 0) { "{0:00}  " -f $h } else { "" }) }
-    Write-Host ""
-    Write-Host "  Uso por hora (% de la semana gastado en cada hora)" -ForegroundColor Cyan
-    Write-Host ("          " + $hdr) -ForegroundColor DarkGray
-    $today = [System.TimeZoneInfo]::ConvertTime($Now, $tz).Date
-    for ($k = 6; $k -ge 0; $k--) {
-        $day = $today.AddDays(-$k); $tot = 0.0
-        Write-Host ("  {0} {1}  " -f $day.ToString("ddd").Substring(0, 3), $day.ToString("dd")) -NoNewline -ForegroundColor Gray
-        for ($h = $h0; $h -lt $h1; $h++) {
-            $v = [double]$cell[$day.ToString("yyyy-MM-dd ") + ("{0:00}" -f $h)]; $tot += $v
-            if ($v -le 0)     { Write-Host "··" -NoNewline -ForegroundColor DarkGray }
-            elseif ($v -lt 1.5) { Write-Host "░░" -NoNewline -ForegroundColor Green }
-            elseif ($v -lt 2.5) { Write-Host "▒▒" -NoNewline -ForegroundColor Yellow }
-            elseif ($v -lt 3.5) { Write-Host "▓▓" -NoNewline -ForegroundColor DarkYellow }
-            else                { Write-Host "██" -NoNewline -ForegroundColor Red }
-        }
-        Write-Host $(if ($tot -gt 0) { "  +{0:0}%" -f $tot } else { "" }) -ForegroundColor Gray
-    }
-    Write-Host "          ·· nada  ░░ 1%  ▒▒ 2%  ▓▓ 3%  ██ 4%+" -ForegroundColor DarkGray
+    $html = [IO.File]::ReadAllText($tpl).Replace("/*DATA*/[]", "[" + $sb.ToString() + "]").Replace('/*GEN*/""', '"' + (Get-Date -Format "dd-MM-yyyy HH:mm") + '"')
+    [IO.File]::WriteAllText($ReportPath, $html, (New-Object System.Text.UTF8Encoding $false))
 }
 
 function Get-Usage {
@@ -352,18 +331,24 @@ while ($true) {
         }
     }
 
+    try { Write-Report } catch {}
+    # Enlace clickeable (Ctrl+clic en Windows Terminal) al informe con graficos
+    $esc = [char]27
+    $st  = $esc + "\"
+    $url = "file:///" + $ReportPath.Replace([string][char]92, "/")
     Write-Host ""
+    Write-Host ("  Informe con gráficos: tecla I  o  Ctrl+clic en {0}]8;;{1}{2}abrir informe{0}]8;;{2}" -f $esc, $url, $st) -ForegroundColor Cyan
     Write-Host ("=" * 62) -ForegroundColor DarkGray
 
     $deadline = (Get-Date).AddSeconds($RefreshSeconds)
     # Primera línea del countdown (sin newline para poder sobreescribir con \r)
-    Write-Host ("  Actualiza en {0,3}s  (Ctrl+C salir  ·  R recargar)" -f $RefreshSeconds) -ForegroundColor DarkGray -NoNewline
+    Write-Host ("  Actualiza en {0,3}s  (Ctrl+C salir · R recargar · I informe)" -f $RefreshSeconds) -ForegroundColor DarkGray -NoNewline
 
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
         $secs = [math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
         # \r vuelve al inicio de la línea y sobreescribe sin bajar
-        Write-Host ("`r  Actualiza en {0,3}s  (Ctrl+C salir  ·  R recargar)" -f $secs) -ForegroundColor DarkGray -NoNewline
+        Write-Host ("`r  Actualiza en {0,3}s  (Ctrl+C salir · R recargar · I informe)" -f $secs) -ForegroundColor DarkGray -NoNewline
 
         # $host.UI.RawUI.KeyAvailable/ReadKey se cuelga bajo Windows Terminal (ConPTY) en
         # algunos casos, congelando TODO el script. [Console]::KeyAvailable es mas
@@ -374,6 +359,7 @@ while ($true) {
                 if ([Console]::KeyAvailable) {
                     $key = [Console]::ReadKey($true)
                     if ($key.KeyChar -eq 'r' -or $key.KeyChar -eq 'R') { break }
+                    if ($key.KeyChar -eq 'i' -or $key.KeyChar -eq 'I') { try { Write-Report; Start-Process $ReportPath } catch {} }
                 }
                 $KeyCheckSupported = $true
             } catch {

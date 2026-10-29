@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Informe Claude Watch</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2; --surface: #fcfcfb; --border: #e3e2dd;
+    --text: #0b0b0b; --text-2: #52514e; --muted: #8a8984;
+    --bar: #2a78d6; --bar-hi: #1c5cab; --grid: #ecebe7;
+    --s0: #f0efec; --s1: #cde2fb; --s2: #9ec5f4; --s3: #6da7ec; --s4: #3987e5; --s5: #256abf; --s6: #104281;
+    --limit: #d03b3b; --on-hi: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #121211; --surface: #1a1a19; --border: #2c2c2a;
+      --text: #f0efec; --text-2: #c3c2b7; --muted: #8f8e88;
+      --bar: #3987e5; --bar-hi: #6da7ec; --grid: #262624;
+      --s0: #232321; --s1: #104281; --s2: #184f95; --s3: #256abf; --s4: #3987e5; --s5: #6da7ec; --s6: #b7d3f6; --on-hi: #0b0b0b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #121211; --surface: #1a1a19; --border: #2c2c2a;
+    --text: #f0efec; --text-2: #c3c2b7; --muted: #8f8e88;
+    --bar: #3987e5; --bar-hi: #6da7ec; --grid: #262624;
+    --s0: #232321; --s1: #104281; --s2: #184f95; --s3: #256abf; --s4: #3987e5; --s5: #6da7ec; --s6: #b7d3f6; --on-hi: #0b0b0b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 14px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sub { color: var(--text-2); font-size: 13px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 18px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .seg button { border: 0; background: none; color: var(--text-2); padding: 7px 14px; font: inherit; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--bar); color: #fff; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .card, .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+  .card { padding: 12px 14px; }
+  .card .k { color: var(--text-2); font-size: 12px; }
+  .card .v { font-size: 26px; font-weight: 600; margin-top: 2px; }
+  .card .n { color: var(--muted); font-size: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+  .panel { padding: 14px 16px 12px; margin-bottom: 16px; min-width: 0; }
+  .panel h2 { font-size: 15px; margin: 0; }
+  .panel .hint { color: var(--text-2); font-size: 12px; margin: 2px 0 10px; }
+  .bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 180px; border-bottom: 1px solid var(--border);
+          background: repeating-linear-gradient(to top, transparent 0, transparent 44px, var(--grid) 44px, var(--grid) 45px); }
+  .bars .b { flex: 1; min-width: 3px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; cursor: default; }
+  .bars .b i { display: block; width: 100%; max-width: 46px; background: var(--bar); border-radius: 4px 4px 0 0; min-height: 0; }
+  .bars .b:hover i { background: var(--bar-hi); }
+  .bars .b span { font-size: 11px; color: var(--text-2); margin-bottom: 3px; white-space: nowrap; }
+  .bars .limit { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--limit); pointer-events: none; }
+  .bars .limit em { position: absolute; right: 0; top: -18px; font-size: 11px; font-style: normal; color: var(--text-2); }
+  .xl { display: flex; gap: 2px; margin-top: 4px; }
+  .xl div { flex: 1; min-width: 3px; text-align: center; font-size: 11px; color: var(--text-2); overflow: hidden; white-space: nowrap; }
+  .heat { display: grid; grid-template-columns: 44px repeat(24, 1fr); gap: 2px; }
+  .heat .c { aspect-ratio: 1.4; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text); }
+  .heat .c.dark { color: #fff; }
+  .heat .c.hi { color: var(--on-hi); }
+  .heat .h, .heat .d { font-size: 11px; color: var(--text-2); display: flex; align-items: center; }
+  .heat .h { justify-content: center; }
+  .legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 11px; color: var(--text-2); flex-wrap: wrap; }
+  .legend i { width: 22px; height: 12px; border-radius: 2px; display: inline-block; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; }
+  #tip { position: fixed; pointer-events: none; background: var(--text); color: var(--surface); font-size: 12px; padding: 6px 9px; border-radius: 6px; display: none; z-index: 9; white-space: pre; }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Informe de uso de Claude</h1>
+    <span class="sub" id="gen"></span>
+  </header>
+  <div class="filters">
+    <div class="seg" id="acc"></div>
+    <div class="seg" id="per"></div>
+  </div>
+  <div id="out"></div>
+</div>
+<div id="tip"></div>
+<script>
+const RAW = /*DATA*/[];
+const GEN = /*GEN*/"";
+const TZ = "America/Santiago";
+const DOW = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
+const fmtParts = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23", weekday: "short" });
+const WD = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+function local(t) {
+  const p = Object.fromEntries(fmtParts.formatToParts(new Date(t * 1000)).map(x => [x.type, x.value]));
+  return { day: `${p.year}-${p.month}-${p.day}`, hour: +p.hour, dow: WD[p.weekday] };
+}
+const pct = v => (v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(".", ",")) + "%";
+const dayLabel = d => { const [y, m, dd] = d.split("-"); const w = DOW[(new Date(Date.UTC(y, m - 1, dd)).getUTCDay() + 6) % 7]; return `${w} ${dd}/${m}`; };
+
+const accounts = [...new Set(RAW.map(r => r[1]))];
+const state = { acc: accounts.includes("Trabajo") ? "Trabajo" : accounts[0], per: "mes" };
+const PERIODS = [["semana", "Últimos 7 días", 7], ["mes", "Últimos 30 días", 30], ["hist", "Histórico", null]];
+
+function events(acc) {
+  const rows = RAW.filter(r => r[1] === acc), ev = [];
+  for (let i = 1; i < rows.length; i++) {
+    const a = rows[i - 1], b = rows[i];
+    if (a[2] !== b[2]) continue;
+    const d = b[3] - a[3];
+    if (d > 0) ev.push({ t: b[0], v: d, ...local(b[0]) });
+  }
+  return { rows, ev };
+}
+function daysBetween(a, b) {
+  const out = [], d = new Date(a + "T12:00:00Z"), end = new Date(b + "T12:00:00Z");
+  while (d <= end) { out.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); }
+  return out;
+}
+
+function seg(el, items, key) {
+  el.innerHTML = items.map(([v, l]) => `<button data-v="${v}" aria-pressed="${state[key] === v}">${l}</button>`).join("");
+  el.onclick = e => { const v = e.target.dataset.v; if (v) { state[key] = v; render(); } };
+}
+
+function barChart(items, opts = {}) {
+  const max = Math.max(opts.min || 0, ...items.map(x => x.v)) || 1;
+  const labelEvery = Math.ceil(items.length / (opts.maxLabels || 31));
+  const limit = opts.limit ? `<div class="limit" style="bottom:${(opts.limit / max) * 100}%"><em>${opts.limitText}</em></div>` : "";
+  return `<div class="bars">${limit}${items.map(x => `<div class="b" data-tip="${x.tip}"><span>${opts.values && x.v > 0 ? pct(x.v) : ""}</span><i style="height:${(x.v / max) * 100}%"></i></div>`).join("")}</div>
+    <div class="xl">${items.map((x, i) => `<div>${i % labelEvery === 0 ? x.l : ""}</div>`).join("")}</div>`;
+}
+
+function render() {
+  seg(document.getElementById("acc"), accounts.map(a => [a, a]), "acc");
+  seg(document.getElementById("per"), PERIODS.map(p => [p[0], p[1]]), "per");
+  const out = document.getElementById("out");
+  const { rows, ev } = events(state.acc);
+  if (!rows.length) { out.innerHTML = `<div class="empty">Todavía no hay datos.</div>`; return; }
+  const today = local(Date.now() / 1000).day;
+  const per = PERIODS.find(p => p[0] === state.per);
+  const first = local(rows[0][0]).day;
+  let from = per[2] ? daysBetween("2000-01-01", today).slice(-per[2])[0] : first;
+  if (from < first) from = first;
+  const days = daysBetween(from, today);
+  const E = ev.filter(e => e.day >= from);
+
+  const byDay = Object.fromEntries(days.map(d => [d, 0]));
+  const heat = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const byHour = Array(24).fill(0), byDow = Array(7).fill(0);
+  E.forEach(e => { byDay[e.day] += e.v; heat[e.dow][e.hour] += e.v; byHour[e.hour] += e.v; byDow[e.dow] += e.v; });
+  const dowCount = Array(7).fill(0);
+  days.forEach(d => dowCount[local(Date.parse(d + "T15:00:00Z") / 1000).dow]++);
+  const total = E.reduce((s, e) => s + e.v, 0);
+  const used = days.filter(d => byDay[d] > 0).length;
+  const avgDow = byDow.map((v, i) => dowCount[i] ? v / dowCount[i] : 0);
+  const avgHour = byHour.map(v => v / days.length);
+  const topDow = avgDow.indexOf(Math.max(...avgDow));
+  const topHour = avgHour.indexOf(Math.max(...avgHour));
+  const heatAvg = heat.map((r, i) => r.map(v => dowCount[i] ? v / dowCount[i] : 0));
+  const hmax = Math.max(...heatAvg.flat()) || 1;
+
+  // Cierre de cada semana: el % maximo que alcanzo cada semana de cuota
+  const weeks = {};
+  rows.forEach(r => { if (local(r[0]).day >= from || state.per === "hist") weeks[r[2]] = Math.max(weeks[r[2]] || 0, r[3]); });
+  const weekItems = Object.entries(weeks).map(([k, v]) => {
+    const end = local(Date.parse(k + ":00:00Z") / 1000).day;
+    return { l: dayLabel(end).slice(4), v, tip: `Semana que cierra el ${dayLabel(end)}\nLlegó a ${pct(v)} de la cuota` };
+  });
+
+  const histByWeek = state.per === "hist" && days.length > 45;
+  let dayItems;
+  if (histByWeek) {
+    const wk = {};
+    days.forEach(d => { const w = d.slice(0, 4) + "-" + Math.floor((Date.parse(d) / 864e5 + 3) / 7); (wk[w] ||= { l: dayLabel(d), v: 0, n: 0 }); wk[w].v += byDay[d]; wk[w].n++; });
+    dayItems = Object.values(wk).map(w => ({ l: w.l.slice(4), v: w.v, tip: `Semana desde ${w.l}\n${pct(w.v)} en total` }));
+  } else {
+    dayItems = days.map(d => ({ l: dayLabel(d).slice(0, 3) + " " + d.slice(8), v: byDay[d], tip: `${dayLabel(d)}\n${pct(byDay[d])} de la cuota semanal` }));
+  }
+
+  const lvl = v => v <= 0 ? 0 : Math.min(6, 1 + Math.floor((v / hmax) * 5.999));
+  const heatHtml = `<div class="heat"><div></div>${Array.from({ length: 24 }, (_, h) => `<div class="h">${h % 2 ? "" : String(h).padStart(2, "0")}</div>`).join("")}
+    ${heatAvg.map((r, i) => `<div class="d">${DOW[i]}</div>` + r.map((v, h) => { const L = lvl(v); return `<div class="c${L >= 5 ? " hi" : L >= 3 ? " dark" : ""}" style="background:var(--s${L})" data-tip="${DOW[i]} ${String(h).padStart(2, "0")}:00–${String(h + 1).padStart(2, "0")}:00\nPromedio ${pct(v)} por ${DOW[i]}">${v >= hmax * 0.35 ? pct(v).replace("%", "") : ""}</div>`; }).join("")).join("")}</div>
+    <div class="legend">Menos <i style="background:var(--s0)"></i>${[1, 2, 3, 4, 5, 6].map(i => `<i style="background:var(--s${i})"></i>`).join("")} Más &nbsp;·&nbsp; número = % promedio en esa hora (solo en las horas más fuertes)</div>`;
+
+  out.innerHTML = `
+    <div class="cards">
+      <div class="card"><div class="k">Gastado en el período</div><div class="v">${pct(total)}</div><div class="n">suma de % de cuota semanal</div></div>
+      <div class="card"><div class="k">Promedio por día con uso</div><div class="v">${used ? pct(total / used) : "—"}</div><div class="n">${used} de ${days.length} días con uso</div></div>
+      <div class="card"><div class="k">Día más fuerte</div><div class="v">${total ? DOW[topDow] : "—"}</div><div class="n">${total ? pct(avgDow[topDow]) + " promedio ese día" : ""}</div></div>
+      <div class="card"><div class="k">Hora más fuerte</div><div class="v">${total ? String(topHour).padStart(2, "0") + ":00" : "—"}</div><div class="n">${total ? pct(avgHour[topHour]) + " promedio por día a esa hora" : ""}</div></div>
+    </div>
+    <div class="panel"><h2>${histByWeek ? "Uso por semana" : "Uso por día"}</h2><div class="hint">Cuánto % de la cuota semanal se gastó ${histByWeek ? "cada semana" : "cada día"}. Pasa el mouse por una barra para ver el detalle.</div>${barChart(dayItems, { values: dayItems.length <= 31, maxLabels: 16 })}</div>
+    <div class="panel"><h2>Mapa por día de la semana y hora</h2><div class="hint">Promedio de % gastado en cada hora, por día de la semana. Más oscuro = más uso.</div>${heatHtml}</div>
+    <div class="grid2">
+      <div class="panel"><h2>Promedio por día de la semana</h2><div class="hint">% gastado en promedio cada ${"lunes, martes…"}</div>${barChart(avgDow.map((v, i) => ({ l: DOW[i], v, tip: `${DOW[i]}\nPromedio ${pct(v)} (${dowCount[i]} ${dowCount[i] === 1 ? "día" : "días"} en el período)` })), { values: true })}</div>
+      <div class="panel"><h2>Promedio por hora del día</h2><div class="hint">% gastado en promedio a cada hora, considerando todos los días del período.</div>${barChart(avgHour.map((v, h) => ({ l: h % 3 ? "" : String(h).padStart(2, "0"), v, tip: `${String(h).padStart(2, "0")}:00–${String(h + 1).padStart(2, "0")}:00\nPromedio ${pct(v)} por día` })), {})}</div>
+    </div>
+    <div class="panel"><h2>Cierre de cada semana</h2><div class="hint">Hasta qué % de la cuota llegó cada semana. La línea roja es el tope (100%).</div>${weekItems.length ? barChart(weekItems, { values: true, min: 100, limit: 100, limitText: "tope 100%" }) : `<div class="empty">Sin semanas en el período.</div>`}
+      <details><summary>Ver tabla por día</summary><table><thead><tr><th>Día</th><th class="r">% gastado</th></tr></thead><tbody>${days.slice().reverse().map(d => `<tr><td>${dayLabel(d)}</td><td class="r">${pct(byDay[d])}</td></tr>`).join("")}</tbody></table></details>
+    </div>`;
+}
+
+const tip = document.getElementById("tip");
+document.addEventListener("mousemove", e => {
+  const el = e.target.closest("[data-tip]");
+  if (!el) { tip.style.display = "none"; return; }
+  tip.textContent = el.dataset.tip; tip.style.display = "block";
+  const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8);
+  tip.style.left = x + "px"; tip.style.top = (e.clientY + 14) + "px";
+});
+document.getElementById("gen").textContent = GEN ? "Generado " + GEN + " · se actualiza con cada lectura de Claude Watch" : "";
+render();
+</script>
+</body>
+</html>
