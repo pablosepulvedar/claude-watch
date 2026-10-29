@@ -1,4 +1,4 @@
-# Claude Code Usage Watch
+﻿# Claude Code Usage Watch
 # Lee los porcentajes REALES del plan desde el mismo endpoint que usa /usage
 # (https://api.anthropic.com/api/oauth/usage). Los % coinciden exactamente con /usage.
 # ccusage se usa solo como info de volumen/costo (equivalente API, NO es tu factura).
@@ -73,7 +73,7 @@ function Show-WeekForecast {
     param([string]$Label, [double]$Pct, [string]$ResetIso, [datetimeoffset]$Now)
     $reset = [datetimeoffset]::Parse($ResetIso)
     $start = $reset.AddDays(-7)
-    $key   = $reset.ToUniversalTime().ToString("yyyy-MM-ddTHH")
+    $key   = $reset.ToUniversalTime().AddMinutes(30).ToString("yyyy-MM-ddTHH")
     $nowT  = $Now.ToUnixTimeSeconds()
     try { "{0},{1},{2},{3}" -f $nowT, $Label, $key, $Pct.ToString([cultureinfo]::InvariantCulture) | Add-Content $LogPath } catch {}
 
