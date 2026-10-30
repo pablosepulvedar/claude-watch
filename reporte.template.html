@@ -192,7 +192,8 @@ function render() {
 
   out.innerHTML = `
     <div class="cards">
-      <div class="card"><div class="k">Gastado en el período</div><div class="v">${pct(total)}</div><div class="n">suma de % de cuota semanal</div></div>
+      <div class="card"><div class="k">Semana actual</div><div class="v">${pct(rows[rows.length - 1][3])}</div><div class="n">de la cuota, igual que en Claude Watch</div></div>
+      ${(() => { const wk = [...new Set(rows.map(r => r[2]))]; const prev = wk[wk.length - 2]; return prev ? `<div class="card"><div class="k">Semana pasada</div><div class="v">${pct(Math.max(...rows.filter(r => r[2] === prev).map(r => r[3])))}</div><div class="n">hasta donde llegó antes del reinicio</div></div>` : ""; })()}
       <div class="card"><div class="k">Promedio por día con uso</div><div class="v">${used ? pct(total / used) : "—"}</div><div class="n">${used} de ${days.length} días con uso</div></div>
       <div class="card"><div class="k">Día más fuerte</div><div class="v">${total ? DOW[topDow] : "—"}</div><div class="n">${total ? pct(avgDow[topDow]) + " promedio ese día" : ""}</div></div>
       <div class="card"><div class="k">Hora más fuerte</div><div class="v">${total ? String(topHour).padStart(2, "0") + ":00" : "—"}</div><div class="n">${total ? pct(avgHour[topHour]) + " promedio por día a esa hora" : ""}</div></div>
