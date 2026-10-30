@@ -156,7 +156,7 @@ function Show-WeekForecast {
     Draw-Bar -pct ([math]::Min(100, $proj)) -color $(if ($proj -ge 100) { "Red" } else { "Green" })
     if ($hit) {
         $h = [System.TimeZoneInfo]::ConvertTime($hit, $tz)
-        Write-Host ("  Si sigues así: se acaba el {0} a las {1}, antes del reset. Baja el ritmo." -f $h.ToString("ddd dd"), $h.ToString("HH:mm")) -ForegroundColor Red
+        Write-Host ("  Si sigues así: se acaba el {0} a las {1}, antes del reset." -f $h.ToString("ddd dd"), $h.ToString("HH:mm")) -ForegroundColor Red
     } else {
         Write-Host ("  Si sigues así: llegas al reset con ~{0:0}% (te sobra {1:0}%)" -f $proj, (100 - $proj)) -ForegroundColor Green
     }
