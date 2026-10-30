@@ -56,13 +56,6 @@
   .bars .b { flex: 1; min-width: 3px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; cursor: default; }
   .bars .b i { display: block; width: 100%; max-width: 46px; background: var(--bar); border-radius: 4px 4px 0 0; min-height: 0; }
   .bars .b:hover i { background: var(--bar-hi); }
-  .bars .b i.rest { background: var(--s2); margin-bottom: 2px; }
-  .bars .b:hover i.rest { background: var(--s3); }
-  .bars .b i.own { border-radius: 0; }
-  .bars .b i.own.top { border-radius: 4px 4px 0 0; }
-  .key { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--text-2); }
-  .key i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; }
-  td .meter { height: 8px; border-radius: 4px; background: var(--bar); min-width: 2px; }
   .bars .b span { font-size: 11px; color: var(--text-2); margin-bottom: 3px; white-space: nowrap; }
   .bars .limit { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--limit); pointer-events: none; }
   .bars .limit em { position: absolute; right: 0; top: -18px; font-size: 11px; font-style: normal; color: var(--text-2); }
@@ -101,13 +94,6 @@
 <script>
 const RAW = /*DATA*/[];
 const GEN = /*GEN*/"";
-const USO = /*USO*/[];
-const SES = /*SES*/{};
-// US$ por millón de tokens: entrada, escritura de caché (1 h = 2x), lectura de caché, salida
-const PRICE = m => /haiku/.test(m) ? [1, 2, 0.1, 5] : /sonnet/.test(m) ? [3, 6, 0.3, 15] : [5, 10, 0.5, 25];
-const cost = r => PRICE(r[3]).reduce((s, p, i) => s + p * r[4 + i], 0) / 1e6;
-const usd = v => "US$" + (v >= 100 ? v.toFixed(0) : v.toFixed(2).replace(".", ","));
-const modelName = m => (m.match(/opus|sonnet|haiku|fable/) || [m])[0].replace(/^./, c => c.toUpperCase());
 const TZ = "America/Santiago";
 const DOW = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
 const fmtParts = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23", weekday: "short" });
@@ -148,7 +134,7 @@ function barChart(items, opts = {}) {
   const max = Math.max(opts.min || 0, ...items.map(x => x.v)) || 1;
   const labelEvery = Math.ceil(items.length / (opts.maxLabels || 31));
   const limit = opts.limit ? `<div class="limit" style="bottom:${(opts.limit / max) * 100}%"><em>${opts.limitText}</em></div>` : "";
-  return `<div class="bars">${limit}${items.map(x => `<div class="b" data-tip="${x.tip}"><span>${opts.values && x.v > 0 ? pct(x.v) : ""}</span>${x.p == null ? `<i style="height:${(x.v / max) * 100}%"></i>` : `${x.v - x.p > 0 ? `<i class="rest" style="height:${((x.v - x.p) / max) * 100}%"></i>` : ""}<i class="own${x.v - x.p > 0 ? "" : " top"}" style="height:${(x.p / max) * 100}%"></i>`}</div>`).join("")}</div>
+  return `<div class="bars">${limit}${items.map(x => `<div class="b" data-tip="${x.tip}"><span>${opts.values && x.v > 0 ? pct(x.v) : ""}</span><i style="height:${(x.v / max) * 100}%"></i></div>`).join("")}</div>
     <div class="xl">${items.map((x, i) => `<div>${i % labelEvery === 0 ? x.l : ""}</div>`).join("")}</div>`;
 }
 
@@ -189,42 +175,15 @@ function render() {
     return { l: dayLabel(end).slice(4), v, tip: `Semana que cierra el ${dayLabel(end)}\nLlegó a ${pct(v)} de la cuota` };
   });
 
-  // Uso propio de este PC (US$ equivalentes) por día, y factor US$ por 1% de cuota.
-  // ponytail: factor = p90 de US$/% en días con uso; asume que en esos días este PC fue casi el único. Mejora: regresión por hora.
-  const mine = USO.filter(r => r[1] === state.acc).map(r => ({ ...local(r[0]), t: r[0], ses: r[2], model: r[3], c: cost(r) }));
-  const allDay = {}, mineDay = {};
-  ev.forEach(e => allDay[e.day] = (allDay[e.day] || 0) + e.v);
-  mine.forEach(m => mineDay[m.day] = (mineDay[m.day] || 0) + m.c);
-  const ratios = Object.keys(allDay).filter(d => allDay[d] >= 2 && mineDay[d] > 0).map(d => mineDay[d] / allDay[d]).sort((a, b) => a - b);
-  const F = ratios.length ? ratios[Math.floor(0.9 * (ratios.length - 1))] : 0;
-  const ownPct = d => F && byDay[d] != null ? Math.min(byDay[d], (mineDay[d] || 0) / F) : null;
-  const fromP = per[2] ? daysBetween("2000-01-01", today).slice(-per[2])[0] : "0000";
-  const M = mine.filter(m => m.day >= fromP);
-  const mineTotal = mine.filter(m => m.day >= from).reduce((s, m) => s + m.c, 0);
-  const tableTotal = M.reduce((s, m) => s + m.c, 0);
-  const ownTotal = F ? days.reduce((s, d) => s + ownPct(d), 0) : null;
-
   const histByWeek = state.per === "hist" && days.length > 45;
   let dayItems;
   if (histByWeek) {
     const wk = {};
-    days.forEach(d => { const w = d.slice(0, 4) + "-" + Math.floor((Date.parse(d) / 864e5 + 3) / 7); (wk[w] ||= { l: dayLabel(d), v: 0, p: F ? 0 : null, n: 0 }); wk[w].v += byDay[d]; if (F) wk[w].p += ownPct(d); wk[w].n++; });
-    dayItems = Object.values(wk).map(w => ({ l: w.l.slice(4), v: w.v, p: w.p, tip: `Semana desde ${w.l}\nCuenta: ${pct(w.v)}` + (F ? `\nEste PC: ~${pct(w.p)}\nOtros: ~${pct(w.v - w.p)}` : "") }));
+    days.forEach(d => { const w = d.slice(0, 4) + "-" + Math.floor((Date.parse(d) / 864e5 + 3) / 7); (wk[w] ||= { l: dayLabel(d), v: 0, n: 0 }); wk[w].v += byDay[d]; wk[w].n++; });
+    dayItems = Object.values(wk).map(w => ({ l: w.l.slice(4), v: w.v, tip: `Semana desde ${w.l}\n${pct(w.v)} en total` }));
   } else {
-    dayItems = days.map(d => ({ l: dayLabel(d).slice(0, 3) + " " + d.slice(8), v: byDay[d], p: ownPct(d), tip: `${dayLabel(d)}\nCuenta: ${pct(byDay[d])} de la cuota semanal` + (F ? `\nEste PC: ~${pct(ownPct(d))} (${usd(mineDay[d] || 0)})\nOtros: ~${pct(byDay[d] - ownPct(d))}` : "") }));
+    dayItems = days.map(d => ({ l: dayLabel(d).slice(0, 3) + " " + d.slice(8), v: byDay[d], tip: `${dayLabel(d)}\n${pct(byDay[d])} de la cuota semanal` }));
   }
-
-  const grp = {};
-  M.forEach(m => {
-    const name = SES[m.ses] || "Sin título · " + m.ses.slice(0, 8);
-    const g = (grp[name] ||= { name, ses: new Set(), c: 0, models: {}, last: 0 });
-    g.ses.add(m.ses); g.c += m.c; g.models[modelName(m.model)] = (g.models[modelName(m.model)] || 0) + m.c; g.last = Math.max(g.last, m.t);
-  });
-  const G = Object.values(grp).sort((a, b) => b.c - a.c);
-  const gmax = G.length ? G[0].c : 1;
-  const sesRow = g => `<tr><td>${g.name.replace(/</g, "&lt;")}</td><td class="r">${g.ses.size}</td><td>${Object.entries(g.models).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + (Object.keys(g.models).length > 1 ? " " + Math.round(v / g.c * 100) + "%" : "")).join(" · ")}</td><td>${dayLabel(local(g.last).day)}</td><td style="width:22%"><div class="meter" style="width:${g.c / gmax * 100}%"></div></td><td class="r">${usd(g.c)}</td><td class="r">${pct(tableTotal ? g.c / tableTotal * 100 : 0)}</td>${F ? `<td class="r">~${pct(g.c / F)}</td>` : ""}</tr>`;
-  const sesHtml = G.length ? `<table><thead><tr><th>Sesión</th><th class="r">Conv.</th><th>Modelo</th><th>Último uso</th><th></th><th class="r">Equiv. API</th><th class="r">De este PC</th>${F ? `<th class="r">Cuota</th>` : ""}</tr></thead>
-    <tbody>${G.slice(0, 12).map(sesRow).join("")}</tbody></table>${G.length > 12 ? `<details><summary>Ver las otras ${G.length - 12}</summary><table><tbody>${G.slice(12).map(sesRow).join("")}</tbody></table></details>` : ""}` : `<div class="empty">No hay conversaciones de esta cuenta en este PC para el período.</div>`;
 
   const lvl = v => v <= 0 ? 0 : Math.min(6, 1 + Math.floor((v / hmax) * 5.999));
   const heatHtml = `<div class="heat"><div></div>${Array.from({ length: 24 }, (_, h) => `<div class="h">${h % 2 ? "" : String(h).padStart(2, "0")}</div>`).join("")}
@@ -235,13 +194,10 @@ function render() {
     <div class="cards">
       <div class="card"><div class="k">Gastado en el período</div><div class="v">${pct(total)}</div><div class="n">suma de % de cuota semanal</div></div>
       <div class="card"><div class="k">Promedio por día con uso</div><div class="v">${used ? pct(total / used) : "—"}</div><div class="n">${used} de ${days.length} días con uso</div></div>
-      <div class="card"><div class="k">Este PC</div><div class="v">${ownTotal != null ? "~" + pct(ownTotal) : usd(mineTotal)}</div><div class="n">${ownTotal != null ? `${total ? Math.round(ownTotal / total * 100) : 0}% del uso de la cuenta · ${usd(mineTotal)} equiv. API` : "equiv. API (falta historial para estimar %)"}</div></div>
       <div class="card"><div class="k">Día más fuerte</div><div class="v">${total ? DOW[topDow] : "—"}</div><div class="n">${total ? pct(avgDow[topDow]) + " promedio ese día" : ""}</div></div>
       <div class="card"><div class="k">Hora más fuerte</div><div class="v">${total ? String(topHour).padStart(2, "0") + ":00" : "—"}</div><div class="n">${total ? pct(avgHour[topHour]) + " promedio por día a esa hora" : ""}</div></div>
     </div>
-    <div class="panel"><h2>${histByWeek ? "Uso por semana" : "Uso por día"}</h2><div class="hint">Cuánto % de la cuota semanal se gastó ${histByWeek ? "cada semana" : "cada día"}, y qué parte salió de este PC. Pasa el mouse por una barra para ver el detalle.</div>${barChart(dayItems, { values: dayItems.length <= 31, maxLabels: 16 })}
-      ${F ? `<div class="key"><span><i style="background:var(--bar)"></i>Este PC (estimado)</span><span><i style="background:var(--s2)"></i>Otros: otros PC, claude.ai u otras personas con la cuenta</span></div>` : ""}</div>
-    <div class="panel"><h2>Consumo por sesión en este PC</h2><div class="hint">Sale de las conversaciones de Claude Code guardadas en este PC, agrupadas por nombre de sesión. "Equiv. API" es lo que costaría por API: sirve para comparar, no es un cobro.${F ? " Cuota = % estimado de la cuota semanal." : ""}</div>${sesHtml}</div>
+    <div class="panel"><h2>${histByWeek ? "Uso por semana" : "Uso por día"}</h2><div class="hint">Cuánto % de la cuota semanal se gastó ${histByWeek ? "cada semana" : "cada día"}. Pasa el mouse por una barra para ver el detalle.</div>${barChart(dayItems, { values: dayItems.length <= 31, maxLabels: 16 })}</div>
     <div class="panel"><h2>Mapa por día de la semana y hora</h2><div class="hint">Promedio de % gastado en cada hora, por día de la semana. Más oscuro = más uso.</div>${heatHtml}</div>
     <div class="grid2">
       <div class="panel"><h2>Promedio por día de la semana</h2><div class="hint">% gastado en promedio cada ${"lunes, martes…"}</div>${barChart(avgDow.map((v, i) => ({ l: DOW[i], v, tip: `${DOW[i]}\nPromedio ${pct(v)} (${dowCount[i]} ${dowCount[i] === 1 ? "día" : "días"} en el período)` })), { values: true })}</div>

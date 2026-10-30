@@ -40,11 +40,6 @@ $Accounts = @(
 $LogPath = Join-Path $PSScriptRoot "historial.csv"
 $ReportPath = Join-Path $PSScriptRoot "reporte.html"
 $TemplatePath = Join-Path $PSScriptRoot "reporte.template.html"
-# Consumo propio de este PC por hora, sesion y modelo, sacado de las conversaciones locales de Claude Code.
-# Claude Code borra conversaciones viejas; consumo.csv queda como historial.
-$UsoPath = Join-Path $PSScriptRoot "consumo.csv"
-$UsoEstadoPath = Join-Path $PSScriptRoot "consumo.estado.csv"
-$SesionesPath = Join-Path $PSScriptRoot "sesiones.csv"
 $UsageUrl  = "https://api.anthropic.com/api/oauth/usage"
 $ShowCcusage = $false  # poner $true para mostrar seccion de volumen/costo (ccusage)
 # Cada cuanto refrescar (segundos). El endpoint de /usage se bloquea si lo
@@ -189,87 +184,6 @@ function Show-WeekForecast {
     }
 }
 
-function Get-JsonStr { param([string]$Line, [string]$Key, [switch]$Last)
-    $k = '"' + $Key + '":"'
-    $i = if ($Last) { $Line.LastIndexOf($k) } else { $Line.IndexOf($k) }
-    if ($i -lt 0) { return $null }
-    $s = $i + $k.Length
-    $e = $Line.IndexOf('"', $s)
-    if ($e -lt 0) { return $null }
-    $Line.Substring($s, $e - $s).TrimEnd([char]92)
-}
-
-function Update-Consumo {
-    # Lee solo lo nuevo de cada .jsonl (offset guardado) y suma tokens por hora, cuenta, sesion y modelo.
-    # Cada respuesta aparece repetida en varias lineas con el mismo requestId: se cuenta una vez.
-    $uso = @{}
-    if (Test-Path $UsoPath) { foreach ($r in (Import-Csv $UsoPath -Header h, cuenta, sesion, modelo, i, cc, cr, o)) { $uso["$($r.h)|$($r.cuenta)|$($r.sesion)|$($r.modelo)"] = [long[]]@($r.i, $r.cc, $r.cr, $r.o) } }
-    $estado = @{}
-    if (Test-Path $UsoEstadoPath) { foreach ($r in (Import-Csv $UsoEstadoPath)) { $estado[$r.archivo] = $r } }
-    $titulos = @{}
-    if (Test-Path $SesionesPath) { foreach ($r in (Import-Csv $SesionesPath)) { $titulos[$r.sesion] = $r } }
-    $cambio = $false
-    foreach ($acc in $Accounts) {
-        $dir = Join-Path (Split-Path $acc.CredPath) "projects"
-        if (-not (Test-Path $dir)) { continue }
-        foreach ($f in (Get-ChildItem $dir -Recurse -Filter *.jsonl -File)) {
-            $e = $estado[$f.FullName]
-            $off = if ($e) { [long]$e.offset } else { 0L }
-            $prev = if ($e) { [string]$e.ultimo } else { "" }
-            if ($f.Length -le $off) { continue }
-            $fs = [IO.File]::Open($f.FullName, 'Open', 'Read', 'ReadWrite')
-            try {
-                [void]$fs.Seek($off, 'Begin')
-                $buf = New-Object byte[] ($f.Length - $off)
-                $n = 0
-                while ($n -lt $buf.Length) { $r = $fs.Read($buf, $n, $buf.Length - $n); if ($r -le 0) { break }; $n += $r }
-            } finally { $fs.Close() }
-            if ($n -le 0) { continue }
-            $nl = [Array]::LastIndexOf($buf, [byte]10, $n - 1)
-            if ($nl -lt 0) { continue }
-            $off += $nl + 1
-            $vistos = New-Object 'System.Collections.Generic.HashSet[string]'
-            if ($prev) { [void]$vistos.Add($prev) }
-            foreach ($l in [Text.Encoding]::UTF8.GetString($buf, 0, $nl).Split("`n")) {
-                $custom = $l.StartsWith('{"type":"custom-title"')
-                if ($custom -or $l.StartsWith('{"type":"ai-title"')) {
-                    $sid = Get-JsonStr $l "sessionId"
-                    $t = Get-JsonStr $l $(if ($custom) { "customTitle" } else { "aiTitle" })
-                    $old = $titulos[$sid]
-                    if ($sid -and $t -and ($custom -or -not $old -or $old.tipo -ne "custom")) {
-                        $titulos[$sid] = [pscustomobject]@{ sesion = $sid; cuenta = $acc.Label; tipo = $(if ($custom) { "custom" } else { "ai" }); titulo = $t }
-                    }
-                    continue
-                }
-                $u = $l.LastIndexOf('"usage":{"input_tokens":')
-                if ($u -lt 0) { continue }
-                $ra = $l.IndexOf('"role":"assistant"')
-                if ($ra -lt 0 -or $ra -gt 600) { continue }
-                $req = Get-JsonStr $l "requestId" -Last
-                if ($req -and -not $vistos.Add($req)) { continue }
-                $m = [regex]::Match($l.Substring($u, [Math]::Min(300, $l.Length - $u)), '"input_tokens":(\d+),"cache_creation_input_tokens":(\d+),"cache_read_input_tokens":(\d+),"output_tokens":(\d+)')
-                $ts = Get-JsonStr $l "timestamp" -Last
-                if (-not $m.Success -or -not $ts -or $ts.Length -lt 13) { continue }
-                $v = [long[]]@($m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value, $m.Groups[4].Value)
-                if (($v | Measure-Object -Sum).Sum -eq 0) { continue }
-                $h = [DateTimeOffset]::Parse($ts.Substring(0, 13) + ":00:00Z", [cultureinfo]::InvariantCulture).ToUnixTimeSeconds()
-                $sid = Get-JsonStr $l "sessionId" -Last
-                if (-not $sid) { $sid = $f.BaseName }
-                $k = "$h|$($acc.Label)|$sid|$(Get-JsonStr $l 'model')"
-                if (-not $uso.ContainsKey($k)) { $uso[$k] = [long[]]@(0, 0, 0, 0) }
-                for ($j = 0; $j -lt 4; $j++) { $uso[$k][$j] += $v[$j] }
-                if ($req) { $prev = $req }
-            }
-            $estado[$f.FullName] = [pscustomobject]@{ archivo = $f.FullName; offset = $off; ultimo = $prev }
-            $cambio = $true
-        }
-    }
-    if (-not $cambio) { return }
-    [IO.File]::WriteAllLines($UsoPath, [string[]]($uso.GetEnumerator() | ForEach-Object { ($_.Key -replace '\|', ',') + "," + ($_.Value -join ",") }))
-    $estado.Values | Export-Csv $UsoEstadoPath -NoTypeInformation -Encoding UTF8
-    $titulos.Values | Export-Csv $SesionesPath -NoTypeInformation -Encoding UTF8
-}
-
 function Write-Report {
     # Genera reporte.html (graficos semanal/mensual/historico) desde historial.csv; se abre con la tecla I
     $tpl = $TemplatePath
@@ -282,10 +196,7 @@ function Write-Report {
         if ($sb.Length) { [void]$sb.Append(",") }
         [void]$sb.AppendFormat('[{0},"{1}","{2}",{3}]', $r.t, $r.cuenta, $r.semana, $r.pct)
     }
-    $uso = if (Test-Path $UsoPath) { ([IO.File]::ReadAllLines($UsoPath) | ForEach-Object { $c = $_.Split(","); '[{0},"{1}","{2}","{3}",{4},{5},{6},{7}]' -f $c }) -join "," } else { "" }
-    $ses = @{}
-    if (Test-Path $SesionesPath) { foreach ($r in (Import-Csv $SesionesPath)) { $ses[$r.sesion] = $r.titulo } }
-    $html = [IO.File]::ReadAllText($tpl).Replace("/*DATA*/[]", "[" + $sb.ToString() + "]").Replace("/*USO*/[]", "[" + $uso + "]").Replace("/*SES*/{}", ($ses | ConvertTo-Json -Compress)).Replace('/*GEN*/""', '"' + (Get-Date -Format "dd-MM-yyyy HH:mm") + '"')
+    $html = [IO.File]::ReadAllText($tpl).Replace("/*DATA*/[]", "[" + $sb.ToString() + "]").Replace('/*GEN*/""', '"' + (Get-Date -Format "dd-MM-yyyy HH:mm") + '"')
     [IO.File]::WriteAllText($ReportPath, $html, (New-Object System.Text.UTF8Encoding $false))
 }
 
@@ -420,7 +331,6 @@ while ($true) {
         }
     }
 
-    try { Update-Consumo } catch {}
     try { Write-Report } catch {}
     # Enlace clickeable (Ctrl+clic en Windows Terminal) al informe con graficos
     $esc = [char]27
@@ -449,7 +359,7 @@ while ($true) {
                 if ([Console]::KeyAvailable) {
                     $key = [Console]::ReadKey($true)
                     if ($key.KeyChar -eq 'r' -or $key.KeyChar -eq 'R') { break }
-                    if ($key.KeyChar -eq 'i' -or $key.KeyChar -eq 'I') { try { Update-Consumo; Write-Report; Start-Process $ReportPath } catch {} }
+                    if ($key.KeyChar -eq 'i' -or $key.KeyChar -eq 'I') { try { Write-Report; Start-Process $ReportPath } catch {} }
                 }
                 $KeyCheckSupported = $true
             } catch {
