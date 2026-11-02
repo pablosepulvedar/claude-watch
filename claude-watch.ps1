@@ -31,9 +31,9 @@ public static extern bool SetConsoleMode(System.IntPtr hConsoleHandle, uint dwMo
 
 $Accounts = @(
     @{ Label = "Personal"; CredPath = Join-Path $env:USERPROFILE ".claude\.credentials.json" }
-    # Horario: dias (1=lunes..5=viernes) y horas en que se trabaja; fuera de eso la proyeccion no suma uso.
-    # Sin Horario se asume que se puede usar a cualquier hora.
-    @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json"; Horario = @{ Dias = 1..5; Desde = 8; Hasta = 21 } }
+    # Horario: dias (1=lunes..5=viernes) y horas de trabajo (17.5 = 17:30). Fuera de horario y fines de semana
+    # se proyecta con el ritmo que realmente tuvieron esas horas. Sin Horario todas las horas son iguales.
+    @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json"; Horario = @{ Dias = 1..5; Desde = 8; Hasta = 17.5 } }
 )
 # Historial local de % semanal (una fila por refresco y cuenta) para calcular el ritmo de las ultimas 24h.
 # ponytail: crece ~1 MB/ano; borrar el archivo si molesta, solo se vuelve al promedio de la semana.
@@ -73,23 +73,50 @@ function Get-SantiagoTime {
     return [System.TimeZoneInfo]::ConvertTime($dto, $tz)
 }
 
-function Test-UsableHour {
+function Get-HourCat {
+    # "lab" = dentro del horario, "noche" = dia laboral fuera del horario, "finde" = dia no laboral
     param([datetimeoffset]$T, $Horario)
-    if (-not $Horario) { return $true }
+    if (-not $Horario) { return "lab" }
     $l = [System.TimeZoneInfo]::ConvertTime($T, $tz)
-    return ($Horario.Dias -contains [int]$l.DayOfWeek) -and $l.Hour -ge $Horario.Desde -and $l.Hour -lt $Horario.Hasta
+    if ($Horario.Dias -notcontains [int]$l.DayOfWeek) { return "finde" }
+    $h = $l.Hour + $l.Minute / 60
+    if ($h -ge $Horario.Desde -and $h -lt $Horario.Hasta) { "lab" } else { "noche" }
 }
 
-function Get-UsableHours {
-    param([datetimeoffset]$From, [datetimeoffset]$To, $Horario)
-    $h = 0.0; $t = $From
-    while ($t -lt $To) {
-        $n = [datetimeoffset]::new($t.UtcDateTime.Date.AddHours($t.UtcDateTime.Hour + 1), [timespan]::Zero)
-        if ($n -gt $To) { $n = $To }
-        if (Test-UsableHour $t $Horario) { $h += ($n - $t).TotalHours }
-        $t = $n
+function Get-NextSlice {
+    # Siguiente limite de media hora (Chile cambia de hora en horas enteras, asi que coincide en UTC)
+    param([datetimeoffset]$T)
+    $u = $T.UtcDateTime
+    [datetimeoffset]::new($u.Date.AddMinutes(30 * ([math]::Floor(($u.Hour * 60 + $u.Minute) / 30) + 1)), [timespan]::Zero)
+}
+
+function Get-Spread {
+    # Reparte cada aumento de % en el tiempo que paso entre dos lecturas (si el PC estuvo apagado, en todo
+    # el hueco) y lo suma por categoria de hora y por dia local. Solo desde $Desde y dentro de una misma semana.
+    param($Rows, [long]$Desde, $Horario)
+    $r = @{ inc = @{ lab = 0.0; noche = 0.0; finde = 0.0 }; hrs = @{ lab = 0.0; noche = 0.0; finde = 0.0 }; dia = [ordered]@{}; dow = @{} }
+    for ($i = 1; $i -lt $Rows.Count; $i++) {
+        $p0 = $Rows[$i - 1]; $p1 = $Rows[$i]
+        $b0 = [long]$p0.t; $v0 = [double]$p0.pct
+        if ($p1.semana -ne $p0.semana) {
+            # Primera lectura de una semana nueva: lo que marca se gasto desde que empezo esa semana
+            $b0 = [math]::Max($b0, [datetimeoffset]::Parse($p1.semana + ":00:00Z").AddDays(-7).ToUnixTimeSeconds()); $v0 = 0
+        }
+        $t0 = [math]::Max($b0, $Desde); $t1 = [long]$p1.t
+        if ($t1 -le $t0) { continue }
+        $perSec = [math]::Max(0, [double]$p1.pct - $v0) / ($t1 - $b0)
+        $t = [datetimeoffset]::FromUnixTimeSeconds($t0); $end = [datetimeoffset]::FromUnixTimeSeconds($t1)
+        while ($t -lt $end) {
+            $n = Get-NextSlice $t
+            if ($n -gt $end) { $n = $end }
+            $s = ($n - $t).TotalSeconds; $c = Get-HourCat $t $Horario
+            $r.hrs[$c] += $s / 3600; $r.inc[$c] += $perSec * $s
+            $l = [System.TimeZoneInfo]::ConvertTime($t, $tz); $dk = $l.ToString("ddd dd")
+            $r.dia[$dk] = [double]$r.dia[$dk] + $perSec * $s; $r.dow[$dk] = [int]$l.DayOfWeek
+            $t = $n
+        }
     }
-    return $h
+    $r
 }
 
 function Show-WeekForecast {
@@ -106,49 +133,33 @@ function Show-WeekForecast {
 
     $all = @()
     if (Test-Path $LogPath) { $all = @(Import-Csv $LogPath -Header t, cuenta, semana, pct | Where-Object { $_.cuenta -eq $Label }) }
-    $week = @($all | Where-Object { $_.semana -eq $key })
 
-    # Ritmo reciente por hora de uso posible (horario): mira hacia atras tanto como falta para el reset
-    # (min 3h, max 24h); si el historial no alcanza, desde que empezo la semana
-    $win  = [math]::Min(24, [math]::Max(3, $hRem))
-    $ref  = $week | Where-Object { [long]$_.t -le $nowT - $win * 3600 } | Select-Object -Last 1
-    if ($ref) {
-        $rate = ($Pct - [double]$ref.pct) / [math]::Max(0.5, (Get-UsableHours ([datetimeoffset]::FromUnixTimeSeconds([long]$ref.t)) $Now $Horario))
-        $base = "según el ritmo de las últimas {0:0}h" -f $win
+    # Ritmo de los ultimos 7 dias por tipo de hora: en horario, noches de dias laborales y fin de semana.
+    # ponytail: los 7 dias pesan igual; si cambias de ritmo de golpe tarda unos dias en notarse.
+    $sp = Get-Spread $all ($nowT - 7 * 86400) $Horario
+    $rate = @{}
+    foreach ($c in "lab", "noche", "finde") { $rate[$c] = if ($sp.hrs[$c] -ge 1) { $sp.inc[$c] / $sp.hrs[$c] } else { 0.0 } }
+    $cov = $sp.hrs.lab + $sp.hrs.noche + $sp.hrs.finde
+    if ($sp.hrs.lab -lt 1) { $rate.lab = $Pct / $hElap }
+    $dias = [math]::Max(1, [math]::Round($cov / 24))
+    $per = if ($dias -eq 1) { "del último día" } else { "de los últimos $dias días" }
+    $base = if ($Horario) {
+        "ritmo {0}: {1:0.0}%/h en horario · {2:0.0}%/h fuera de horario · {3:0.0}%/h fin de semana" -f $per, $rate.lab, $rate.noche, $rate.finde
     } else {
-        $rate = $Pct / [math]::Max(0.5, (Get-UsableHours $start $Now $Horario))
-        $base = "según el ritmo desde que empezó la semana"
-    }
-    if ($Horario) { $base += ", solo en horario laboral" }
-
-    # Patron: % que subes en promedio cada (dia de semana, hora), aprendido de semanas anteriores.
-    # ponytail: una hora observada solo en parte cuenta como entera; con varias semanas se diluye.
-    $inc = @{}; $seen = @{}
-    for ($i = 1; $i -lt $all.Count; $i++) {
-        $p0 = $all[$i - 1]; $p1 = $all[$i]
-        if ($p1.semana -ne $p0.semana -or $p1.semana -eq $key) { continue }
-        if (([long]$p1.t - [long]$p0.t) -gt 1800) { continue }
-        $b = [System.TimeZoneInfo]::ConvertTime([datetimeoffset]::FromUnixTimeSeconds([long]$p1.t), $tz).ToString("ddd-HH")
-        $inc[$b] = [double]$inc[$b] + [math]::Max(0, [double]$p1.pct - [double]$p0.pct)
-        if (-not $seen[$b]) { $seen[$b] = @{} }
-        $seen[$b][$p1.semana] = 1
+        "ritmo {0}: {1:0.0}%/h" -f $per, $rate.lab
     }
 
-    # Proyeccion hora a hora hasta el reset: patron si esa hora ya se vio otra semana, si no el ritmo reciente
-    $proj = $Pct; $hit = $null; $hPat = 0.0
-    $tcur = $Now
+    # Proyeccion por medias horas hasta el reset con el ritmo de cada tipo de hora
+    $proj = $Pct; $hit = $null; $tcur = $Now
     while ($tcur -lt $reset) {
-        $tnext = [datetimeoffset]::new($tcur.UtcDateTime.Date.AddHours($tcur.UtcDateTime.Hour + 1), [timespan]::Zero)
+        $tnext = Get-NextSlice $tcur
         if ($tnext -gt $reset) { $tnext = $reset }
         $f = ($tnext - $tcur).TotalHours
-        $b = [System.TimeZoneInfo]::ConvertTime($tcur, $tz).ToString("ddd-HH")
-        if ($seen[$b]) { $step = $inc[$b] / $seen[$b].Count * $f; $hPat += $f }
-        elseif (Test-UsableHour $tcur $Horario) { $step = $rate * $f } else { $step = 0 }
+        $step = $rate[(Get-HourCat $tcur $Horario)] * $f
         if (-not $hit -and $step -gt 0 -and $proj + $step -ge 100) { $hit = $tcur.AddHours((100 - $proj) / $step * $f) }
         $proj += $step
         $tcur = $tnext
     }
-    if ($hPat -ge $hRem / 2) { $base = "según tu patrón de semanas anteriores" }
 
     Write-Host "  Tiempo    " -NoNewline
     Draw-Bar -pct ($hElap / 168 * 100) -color DarkCyan
@@ -162,25 +173,19 @@ function Show-WeekForecast {
     }
     Write-Host ("  ({0})" -f $base) -ForegroundColor DarkGray
 
-    # Uso por dia de esta semana (solo dias con historial)
-    $days = [ordered]@{}
-    foreach ($r in $week) {
-        $dk = [System.TimeZoneInfo]::ConvertTime([datetimeoffset]::FromUnixTimeSeconds([long]$r.t), $tz).ToString("ddd dd")
-        if (-not $days.Contains($dk)) { $days[$dk] = @([double]$r.pct, [double]$r.pct) }
-        $days[$dk][1] = [double]$r.pct
-    }
-    if ($days.Count -gt 0) {
-        $parts = @(); $prev = $null; $sum = 0.0; $n = 0
+    # Uso por dia de esta semana, fines de semana incluidos; el promedio solo cuenta dias laborales completos
+    $sw = Get-Spread $all $start.ToUnixTimeSeconds() $Horario
+    if ($sw.dia.Count -gt 0) {
         $today = [System.TimeZoneInfo]::ConvertTime($Now, $tz).ToString("ddd dd")
-        foreach ($dk in $days.Keys) {
-            $first, $last = $days[$dk]
-            $d = if ($null -ne $prev) { $last - $prev } else { $last - $first }
-            $parts += ("{0} +{1:0}%" -f $dk.Substring(0, 3), $d)
-            if ($null -ne $prev -and $dk -ne $today) { $sum += $d; $n++ }
-            $prev = $last
+        $first = @($sw.dia.Keys)[0]
+        $parts = @(); $sum = 0.0; $n = 0
+        foreach ($dk in $sw.dia.Keys) {
+            $v = $sw.dia[$dk]
+            $parts += ("{0} +{1}%" -f $dk.Substring(0, 3), $v.ToString($(if ($v -gt 0 -and $v -lt 1) { "0.0" } else { "0" })))
+            if ($dk -ne $first -and $dk -ne $today -and (-not $Horario -or $Horario.Dias -contains $sw.dow[$dk])) { $sum += $v; $n++ }
         }
         Write-Host ("  Por día   " + ($parts -join "  ")) -ForegroundColor Gray
-        if ($n -gt 0) { Write-Host ("  Promedio  {0:0.0}% por día completo" -f ($sum / $n)) -ForegroundColor Gray }
+        if ($n -gt 0) { Write-Host ("  Promedio  {0:0.0}% por día {1}completo" -f ($sum / $n), $(if ($Horario) { "laboral " } else { "" })) -ForegroundColor Gray }
     }
 }
 
