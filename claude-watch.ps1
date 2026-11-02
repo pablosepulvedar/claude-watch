@@ -91,8 +91,8 @@ function Get-NextSlice {
 }
 
 function Get-Spread {
-    # Reparte cada aumento de % en el tiempo que paso entre dos lecturas (si el PC estuvo apagado, en todo
-    # el hueco) y lo suma por categoria de hora y por dia local. Solo desde $Desde y dentro de una misma semana.
+    # Reparte cada aumento de % en el tiempo que paso entre dos lecturas y lo suma por categoria de hora
+    # y por dia local. Solo cuenta desde $Desde.
     param($Rows, [long]$Desde, $Horario)
     $r = @{ inc = @{ lab = 0.0; noche = 0.0; finde = 0.0 }; hrs = @{ lab = 0.0; noche = 0.0; finde = 0.0 }; dia = [ordered]@{}; dow = @{} }
     for ($i = 1; $i -lt $Rows.Count; $i++) {
@@ -104,15 +104,20 @@ function Get-Spread {
         }
         $t0 = [math]::Max($b0, $Desde); $t1 = [long]$p1.t
         if ($t1 -le $t0) { continue }
-        $perSec = [math]::Max(0, [double]$p1.pct - $v0) / ($t1 - $b0)
+        # Hueco largo (Claude Watch cerrado o PC apagado): el aumento va al momento en que se dejo de medir,
+        # que es cuando se estaba usando; el resto del hueco cuenta como horas sin uso.
+        $total = [math]::Max(0, [double]$p1.pct - $v0)
+        $largo = ($t1 - $b0) -gt 7200
+        $perSec = if ($largo) { 0.0 } else { $total / ($t1 - $b0) }
         $t = [datetimeoffset]::FromUnixTimeSeconds($t0); $end = [datetimeoffset]::FromUnixTimeSeconds($t1)
         while ($t -lt $end) {
             $n = Get-NextSlice $t
             if ($n -gt $end) { $n = $end }
             $s = ($n - $t).TotalSeconds; $c = Get-HourCat $t $Horario
-            $r.hrs[$c] += $s / 3600; $r.inc[$c] += $perSec * $s
+            $add = if ($largo -and $t.ToUnixTimeSeconds() -eq $b0) { $total } else { $perSec * $s }
+            $r.hrs[$c] += $s / 3600; $r.inc[$c] += $add
             $l = [System.TimeZoneInfo]::ConvertTime($t, $tz); $dk = $l.ToString("ddd dd")
-            $r.dia[$dk] = [double]$r.dia[$dk] + $perSec * $s; $r.dow[$dk] = [int]$l.DayOfWeek
+            $r.dia[$dk] = [double]$r.dia[$dk] + $add; $r.dow[$dk] = [int]$l.DayOfWeek
             $t = $n
         }
     }
