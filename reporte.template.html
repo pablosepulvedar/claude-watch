@@ -115,7 +115,9 @@ function events(acc) {
     const a = rows[i - 1], b = rows[i];
     if (a[2] !== b[2]) continue;
     const d = b[3] - a[3];
-    if (d > 0) ev.push({ t: b[0], v: d, ...local(b[0]) });
+    // Hueco largo (Claude Watch cerrado): el aumento va a cuando se dejó de medir, igual que en la consola
+    const t = b[0] - a[0] > 7200 ? a[0] : b[0];
+    if (d > 0) ev.push({ t, v: d, ...local(t) });
   }
   return { rows, ev };
 }
