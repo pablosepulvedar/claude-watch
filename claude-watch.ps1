@@ -148,11 +148,10 @@ function Show-WeekForecast {
     if ($sp.hrs.lab -lt 1) { $rate.lab = $Pct / $hElap }
     $dias = [math]::Max(1, [math]::Round($cov / 24))
     $per = if ($dias -eq 1) { "del último día" } else { "de los últimos $dias días" }
-    $base = if ($Horario) {
-        "ritmo {0}: {1:0.0}%/h en horario · {2:0.0}%/h fuera de horario · {3:0.0}%/h fin de semana" -f $per, $rate.lab, $rate.noche, $rate.finde
-    } else {
-        "ritmo {0}: {1:0.0}%/h" -f $per, $rate.lab
-    }
+    $partes = @(("{0:0.0}%/h" -f $rate.lab) + $(if ($Horario) { " en horario" } else { "" }))
+    if ($rate.noche -ge 0.05) { $partes += "{0:0.0}%/h fuera de horario" -f $rate.noche }
+    if ($rate.finde -ge 0.05) { $partes += "{0:0.0}%/h fin de semana" -f $rate.finde }
+    $base = "ritmo {0}: {1}" -f $per, ($partes -join " · ")
 
     # Proyeccion por medias horas hasta el reset con el ritmo de cada tipo de hora
     $proj = $Pct; $hit = $null; $tcur = $Now
@@ -186,11 +185,11 @@ function Show-WeekForecast {
         $parts = @(); $sum = 0.0; $n = 0
         foreach ($dk in $sw.dia.Keys) {
             $v = $sw.dia[$dk]
-            $parts += ("{0} +{1}%" -f $dk.Substring(0, 3), $v.ToString($(if ($v -gt 0 -and $v -lt 1) { "0.0" } else { "0" })))
+            if ($v -ge 0.05) { $parts += ("{0} +{1}%" -f $dk.Substring(0, 3), $v.ToString($(if ($v -gt 0 -and $v -lt 1) { "0.0" } else { "0" }))) }
             if ($dk -ne $first -and $dk -ne $today -and (-not $Horario -or $Horario.Dias -contains $sw.dow[$dk])) { $sum += $v; $n++ }
         }
-        Write-Host ("  Por día   " + ($parts -join "  ")) -ForegroundColor Gray
-        if ($n -gt 0) { Write-Host ("  Promedio  {0:0.0}% por día {1}completo" -f ($sum / $n), $(if ($Horario) { "laboral " } else { "" })) -ForegroundColor Gray }
+        if ($parts) { Write-Host ("  Por día   " + ($parts -join "  ")) -ForegroundColor Gray }
+        if ($n -gt 0 -and $sum / $n -ge 0.05) { Write-Host ("  Promedio  {0:0.0}% por día {1}completo" -f ($sum / $n), $(if ($Horario) { "laboral " } else { "" })) -ForegroundColor Gray }
     }
 }
 
