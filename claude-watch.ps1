@@ -31,9 +31,10 @@ public static extern bool SetConsoleMode(System.IntPtr hConsoleHandle, uint dwMo
 
 $Accounts = @(
     @{ Label = "Personal"; CredPath = Join-Path $env:USERPROFILE ".claude\.credentials.json" }
-    # Horario: dias (1=lunes..5=viernes) y horas de trabajo (17.5 = 17:30). Fuera de horario y fines de semana
-    # se proyecta con el ritmo que realmente tuvieron esas horas. Sin Horario todas las horas son iguales.
-    @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json"; Horario = @{ Dias = 1..5; Desde = 8; Hasta = 17.5 } }
+    # Horario: dias (1=lunes..5=viernes) y horas de trabajo (HastaViernes = salida del viernes). Lo usado fuera
+    # de horario se suma al ritmo de las horas de trabajo y la proyeccion solo avanza en horario.
+    # Sin Horario todas las horas son iguales.
+    @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json"; Horario = @{ Dias = 1..5; Desde = 8; Hasta = 17 + 50 / 60; HastaViernes = 16 } }
 )
 # Historial local de % semanal (una fila por refresco y cuenta) para calcular el ritmo de las ultimas 24h.
 # ponytail: crece ~1 MB/ano; borrar el archivo si molesta, solo se vuelve al promedio de la semana.
@@ -80,14 +81,15 @@ function Get-HourCat {
     $l = [System.TimeZoneInfo]::ConvertTime($T, $tz)
     if ($Horario.Dias -notcontains [int]$l.DayOfWeek) { return "finde" }
     $h = $l.Hour + $l.Minute / 60
-    if ($h -ge $Horario.Desde -and $h -lt $Horario.Hasta) { "lab" } else { "noche" }
+    $fin = if ([int]$l.DayOfWeek -eq 5 -and $Horario.HastaViernes) { $Horario.HastaViernes } else { $Horario.Hasta }
+    if ($h -ge $Horario.Desde -and $h -lt $fin) { "lab" } else { "noche" }
 }
 
 function Get-NextSlice {
-    # Siguiente limite de media hora (Chile cambia de hora en horas enteras, asi que coincide en UTC)
+    # Siguiente limite de 10 minutos (Chile cambia de hora en horas enteras, asi que coincide en UTC)
     param([datetimeoffset]$T)
     $u = $T.UtcDateTime
-    [datetimeoffset]::new($u.Date.AddMinutes(30 * ([math]::Floor(($u.Hour * 60 + $u.Minute) / 30) + 1)), [timespan]::Zero)
+    [datetimeoffset]::new($u.Date.AddMinutes(10 * ([math]::Floor(($u.Hour * 60 + $u.Minute) / 10) + 1)), [timespan]::Zero)
 }
 
 function Get-Spread {
@@ -139,21 +141,18 @@ function Show-WeekForecast {
     $all = @()
     if (Test-Path $LogPath) { $all = @(Import-Csv $LogPath -Header t, cuenta, semana, pct | Where-Object { $_.cuenta -eq $Label }) }
 
-    # Ritmo de los ultimos 7 dias por tipo de hora: en horario, noches de dias laborales y fin de semana.
+    # Ritmo de los ultimos 7 dias. Con horario, todo lo gastado (incluso fuera de horario) se reparte solo
+    # en las horas de trabajo, y la proyeccion solo avanza dentro del horario.
     # ponytail: los 7 dias pesan igual; si cambias de ritmo de golpe tarda unos dias en notarse.
     $sp = Get-Spread $all ($nowT - 7 * 86400) $Horario
-    $rate = @{}
-    foreach ($c in "lab", "noche", "finde") { $rate[$c] = if ($sp.hrs[$c] -ge 1) { $sp.inc[$c] / $sp.hrs[$c] } else { 0.0 } }
+    $rate = @{ lab = 0.0; noche = 0.0; finde = 0.0 }
+    if ($sp.hrs.lab -ge 1) { $rate.lab = ($sp.inc.lab + $sp.inc.noche + $sp.inc.finde) / $sp.hrs.lab } else { $rate.lab = $Pct / $hElap }
     $cov = $sp.hrs.lab + $sp.hrs.noche + $sp.hrs.finde
-    if ($sp.hrs.lab -lt 1) { $rate.lab = $Pct / $hElap }
     $dias = [math]::Max(1, [math]::Round($cov / 24))
     $per = if ($dias -eq 1) { "del último día" } else { "de los últimos $dias días" }
-    $partes = @(("{0:0.0}%/h" -f $rate.lab) + $(if ($Horario) { " en horario" } else { "" }))
-    if ($rate.noche -ge 0.05) { $partes += "{0:0.0}%/h fuera de horario" -f $rate.noche }
-    if ($rate.finde -ge 0.05) { $partes += "{0:0.0}%/h fin de semana" -f $rate.finde }
-    $base = "ritmo {0}: {1}" -f $per, ($partes -join " · ")
+    $base = "ritmo {0}: {1:0.0}%/h{2}" -f $per, $rate.lab, $(if ($Horario) { " de horario laboral, incluye lo usado fuera de horario" } else { "" })
 
-    # Proyeccion por medias horas hasta el reset con el ritmo de cada tipo de hora
+    # Proyeccion por tramos de 10 minutos hasta el reset con el ritmo de cada tipo de hora
     $proj = $Pct; $hit = $null; $tcur = $Now
     while ($tcur -lt $reset) {
         $tnext = Get-NextSlice $tcur
