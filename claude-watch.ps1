@@ -34,7 +34,7 @@ $Accounts = @(
     # Horario: dias (1=lunes..5=viernes) y horas de trabajo (HastaViernes = salida del viernes). Lo usado fuera
     # de horario se suma al ritmo de las horas de trabajo y la proyeccion solo avanza en horario.
     # Sin Horario todas las horas son iguales.
-    @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json"; Horario = @{ Dias = 1..5; Desde = 8; Hasta = 17 + 50 / 60; HastaViernes = 16 } }
+    @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json"; Horario = @{ Dias = 1..5; Desde = 8; Hasta = 17.5; HastaViernes = 16 } }
 )
 # Historial local de % semanal (una fila por refresco y cuenta) para calcular el ritmo de las ultimas 24h.
 # ponytail: crece ~1 MB/ano; borrar el archivo si molesta, solo se vuelve al promedio de la semana.
@@ -150,7 +150,7 @@ function Show-WeekForecast {
     $cov = $sp.hrs.lab + $sp.hrs.noche + $sp.hrs.finde
     $dias = [math]::Max(1, [math]::Round($cov / 24))
     $per = if ($dias -eq 1) { "del último día" } else { "de los últimos $dias días" }
-    $base = "ritmo {0}: {1:0.0}%/h{2}" -f $per, $rate.lab, $(if ($Horario) { " de horario laboral, incluye lo usado fuera de horario" } else { "" })
+    $base = "ritmo {0}: {1:0.0}%/h{2}" -f $per, $rate.lab, $(if ($Horario) { " en horario, con lo de fuera de horario" } else { "" })
 
     # Proyeccion por tramos de 10 minutos hasta el reset con el ritmo de cada tipo de hora
     $proj = $Pct; $hit = $null; $tcur = $Now
