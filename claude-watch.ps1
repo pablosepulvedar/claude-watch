@@ -150,7 +150,7 @@ function Show-WeekForecast {
     $cov = $sp.hrs.lab + $sp.hrs.noche + $sp.hrs.finde
     $dias = [math]::Max(1, [math]::Round($cov / 24))
     $per = if ($dias -eq 1) { "del último día" } else { "de los últimos $dias días" }
-    $base = "ritmo {0}: {1:0.0}%/h{2}" -f $per, $rate.lab, $(if ($Horario) { " en horario, con lo de fuera de horario" } else { "" })
+    $base = "ritmo {0}: {1:0.0}%/h{2}" -f $per, $rate.lab, $(if ($Horario) { " en horario laboral" } else { "" })
 
     # Proyeccion por tramos de 10 minutos hasta el reset con el ritmo de cada tipo de hora
     $proj = $Pct; $hit = $null; $tcur = $Now
