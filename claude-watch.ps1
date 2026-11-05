@@ -141,16 +141,23 @@ function Show-WeekForecast {
     $all = @()
     if (Test-Path $LogPath) { $all = @(Import-Csv $LogPath -Header t, cuenta, semana, pct | Where-Object { $_.cuenta -eq $Label }) }
 
-    # Ritmo de los ultimos 7 dias. Con horario, todo lo gastado (incluso fuera de horario) se reparte solo
-    # en las horas de trabajo, y la proyeccion solo avanza dentro del horario.
-    # ponytail: los 7 dias pesan igual; si cambias de ritmo de golpe tarda unos dias en notarse.
-    $sp = Get-Spread $all ($nowT - 7 * 86400) $Horario
+    # Ritmo sostenido: todo el historial (hasta 8 semanas) para proyectar; la ultima semana solo se muestra.
+    # Con horario, todo lo gastado (incluso fuera de horario) se reparte solo en las horas de trabajo,
+    # y la proyeccion solo avanza dentro del horario.
+    # ponytail: todos los dias pesan igual; un cambio de ritmo reciente tarda en notarse en la proyeccion.
+    $ritmo = {
+        param($desde)
+        $s = Get-Spread $all $desde $Horario
+        $r = if ($s.hrs.lab -ge 1) { ($s.inc.lab + $s.inc.noche + $s.inc.finde) / $s.hrs.lab } else { $null }
+        @{ r = $r; dias = [math]::Max(1, [math]::Round(($s.hrs.lab + $s.hrs.noche + $s.hrs.finde) / 24)) }
+    }
+    $largo = & $ritmo ($nowT - 56 * 86400)
+    $corto = & $ritmo ($nowT - 7 * 86400)
     $rate = @{ lab = 0.0; noche = 0.0; finde = 0.0 }
-    if ($sp.hrs.lab -ge 1) { $rate.lab = ($sp.inc.lab + $sp.inc.noche + $sp.inc.finde) / $sp.hrs.lab } else { $rate.lab = $Pct / [math]::Max($hElap, 1) }
-    $cov = $sp.hrs.lab + $sp.hrs.noche + $sp.hrs.finde
-    $dias = [math]::Max(1, [math]::Round($cov / 24))
-    $per = if ($dias -eq 1) { "del último día" } else { "de los últimos $dias días" }
-    $base = "ritmo {0}: {1:0.0}%/h{2}" -f $per, $rate.lab, $(if ($Horario) { " en horario laboral" } else { "" })
+    $rate.lab = if ($null -ne $largo.r) { $largo.r } else { $Pct / [math]::Max($hElap, 1) }
+    $hor = if ($Horario) { " en horario laboral" } else { "" }
+    $base = "ritmo sostenido de {0} {1}: {2:0.0}%/h{3}" -f $largo.dias, $(if ($largo.dias -eq 1) { "día" } else { "días" }), $rate.lab, $hor
+    if ($null -ne $corto.r -and $largo.dias -gt 8) { $base += " · última semana {0:0.0}%/h" -f $corto.r }
 
     # Proyeccion por tramos de 10 minutos hasta el reset con el ritmo de cada tipo de hora
     $proj = $Pct; $hit = $null; $tcur = $Now
