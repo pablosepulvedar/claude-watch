@@ -136,7 +136,7 @@ function Show-WeekForecast {
 
     $hElap = ($Now - $start).TotalHours
     $hRem  = ($reset - $Now).TotalHours
-    if ($hElap -lt 1 -or $hRem -le 0) { return }
+    if ($hRem -le 0) { return }
 
     $all = @()
     if (Test-Path $LogPath) { $all = @(Import-Csv $LogPath -Header t, cuenta, semana, pct | Where-Object { $_.cuenta -eq $Label }) }
@@ -146,7 +146,7 @@ function Show-WeekForecast {
     # ponytail: los 7 dias pesan igual; si cambias de ritmo de golpe tarda unos dias en notarse.
     $sp = Get-Spread $all ($nowT - 7 * 86400) $Horario
     $rate = @{ lab = 0.0; noche = 0.0; finde = 0.0 }
-    if ($sp.hrs.lab -ge 1) { $rate.lab = ($sp.inc.lab + $sp.inc.noche + $sp.inc.finde) / $sp.hrs.lab } else { $rate.lab = $Pct / $hElap }
+    if ($sp.hrs.lab -ge 1) { $rate.lab = ($sp.inc.lab + $sp.inc.noche + $sp.inc.finde) / $sp.hrs.lab } else { $rate.lab = $Pct / [math]::Max($hElap, 1) }
     $cov = $sp.hrs.lab + $sp.hrs.noche + $sp.hrs.finde
     $dias = [math]::Max(1, [math]::Round($cov / 24))
     $per = if ($dias -eq 1) { "del último día" } else { "de los últimos $dias días" }
