@@ -48,7 +48,7 @@
   .card .n { color: var(--muted); font-size: 12px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
-  .panel { padding: 14px 16px 12px; margin-bottom: 16px; min-width: 0; }
+  .panel { padding: 14px 16px 12px; margin-bottom: 16px; min-width: 0; overflow-x: auto; }
   .panel h2 { font-size: 15px; margin: 0; }
   .panel .hint { color: var(--text-2); font-size: 12px; margin: 2px 0 10px; }
   .bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 180px; border-bottom: 1px solid var(--border);
@@ -69,6 +69,10 @@
   .heat .h { justify-content: center; }
   .legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 11px; color: var(--text-2); flex-wrap: wrap; }
   .legend i { width: 22px; height: 12px; border-radius: 2px; display: inline-block; }
+  .stackh { display: flex; height: 18px; border-radius: 4px; overflow: hidden; gap: 2px; }
+  .stackh i { display: block; min-width: 2px; }
+  .bars .b .stackv { display: flex; flex-direction: column; width: 100%; max-width: 46px; gap: 2px; border-radius: 4px 4px 0 0; overflow: hidden; }
+  .bars .b .stackv i { display: block; max-width: none; border-radius: 0; min-height: 1px; }
   details { margin-top: 8px; }
   summary { cursor: pointer; color: var(--text-2); font-size: 13px; }
   table { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 8px; }
@@ -97,6 +101,8 @@ const GEN = /*GEN*/"";
 const TOK = /*TOKENS*/null;
 // US$ por millón de tokens (precio de la API, solo para comparar): entrada, escritura de caché, lectura de caché, salida
 const PRICE = m => /haiku/.test(m) ? [1, 1.25, 0.1, 5] : /sonnet/.test(m) ? [3, 3.75, 0.3, 15] : [5, 6.25, 0.5, 25];
+const FAMS = [["Opus", "#2a78d6"], ["Sonnet", "#e0873a"], ["Haiku", "#2fa37a"], ["Fable", "#c04bb0"], ["Otro", "#8a8984"]];
+const FAM = m => /fable/.test(m) ? "Fable" : /opus/.test(m) ? "Opus" : /sonnet/.test(m) ? "Sonnet" : /haiku/.test(m) ? "Haiku" : "Otro";
 const fmtTok = v => v >= 1e9 ? (v / 1e9).toFixed(2).replace(".", ",") + " mil M" : v >= 1e6 ? (v / 1e6).toFixed(1).replace(".", ",") + " M" : v >= 1e3 ? Math.round(v / 1e3) + " mil" : String(Math.round(v));
 const usd = v => "US$" + (v >= 100 ? Math.round(v).toLocaleString("es-CL") : v.toFixed(2).replace(".", ","));
 function tokensPorDia(acc) {
@@ -104,12 +110,14 @@ function tokensPorDia(acc) {
   const dias = {}, fuentes = TOK.fuentes.filter(f => f.cuenta === acc);
   fuentes.forEach(f => Object.entries(f.horas).forEach(([h, mods]) => {
     const d = local(Date.parse(h + ":30:00Z") / 1000).day;
-    const x = (dias[d] ||= { e: 0, cw: 0, cr: 0, s: 0, usd: 0, por: {} });
+    const x = (dias[d] ||= { e: 0, cw: 0, cr: 0, s: 0, usd: 0, por: {}, mod: {} });
     Object.entries(mods).forEach(([m, v]) => {
       const P = PRICE(m);
       x.e += v[0]; x.cw += v[1]; x.cr += v[2]; x.s += v[3];
       const c = (v[0] * P[0] + v[1] * P[1] + v[2] * P[2] + v[3] * P[3]) / 1e6;
       x.usd += c; x.por[f.nombre] = (x.por[f.nombre] || 0) + v[0] + v[1] + v[2] + v[3];
+      const y = (x.mod[FAM(m)] ||= { tok: 0, usd: 0, n: 0, s: 0 });
+      y.tok += v[0] + v[1] + v[2] + v[3]; y.usd += c; y.n += v[4] || 0; y.s += v[3];
     });
   }));
   return { dias, fuentes };
@@ -255,13 +263,33 @@ function tokensHtml(days, byDay) {
       <div class="card"><div class="k">1% de la cuota equivale a</div><div class="v">${base.length ? fmtTok(tokPorPct) : "—"}</div><div class="n">${base.length ? "≈ " + usd(usdPorPct) + " · mediana de " + base.length + " días" : "faltan días con 2% o más"}</div></div>
       <div class="card"><div class="k">Cuota semanal estimada (100%)</div><div class="v">${base.length ? fmtTok(tokPorPct * 100) : "—"}</div><div class="n">${base.length ? "≈ " + usd(usdPorPct * 100) + " a precio de API" : ""}</div></div>
     </div>
-    <div class="panel"><h2>Tokens por día</h2><div class="hint">Suma de las conversaciones de Claude Code de esta cuenta en este PC y en los servidores. «Tokens por 1%» divide los tokens del día por el % que subió la cuota ese día. Pasa el mouse por una fila para ver de qué equipo salieron.</div>
+    ${modelosHtml(fil)}
+    <div class="panel"><h2>Tokens por día</h2><div class="hint">Suma de las conversaciones de Claude Code de esta cuenta en este PC y en los servidores.</div>
+      <details><summary>Ver tabla por día</summary><div class="hint" style="margin-top:6px">«Tokens por 1%» divide los tokens del día por el % que subió la cuota ese día. Pasa el mouse por una fila para ver de qué equipo salieron.</div>
       <table><thead><tr><th>Día</th><th class="r">Entrada</th><th class="r">Salida</th><th class="r">Caché escrita</th><th class="r">Caché leída</th><th class="r">Total</th><th class="r">Equiv. API</th><th class="r">% cuota</th><th class="r">Tokens por 1%</th></tr></thead>
       <tbody>${filas}</tbody>
-      <tfoot><tr><th>Total</th><th class="r">${fmtTok(sum("e"))}</th><th class="r">${fmtTok(sum("s"))}</th><th class="r">${fmtTok(sum("cw"))}</th><th class="r">${fmtTok(sum("cr"))}</th><th class="r">${fmtTok(totAll)}</th><th class="r">${usd(sum("usd"))}</th><th class="r">${pct(sum("p"))}</th><th></th></tr></tfoot></table>
+      <tfoot><tr><th>Total</th><th class="r">${fmtTok(sum("e"))}</th><th class="r">${fmtTok(sum("s"))}</th><th class="r">${fmtTok(sum("cw"))}</th><th class="r">${fmtTok(sum("cr"))}</th><th class="r">${fmtTok(totAll)}</th><th class="r">${usd(sum("usd"))}</th><th class="r">${pct(sum("p"))}</th><th></th></tr></tfoot></table></details>
       <details><summary>De dónde salen los tokens</summary><table><thead><tr><th>Equipo</th><th>Estado</th><th class="r">Tokens en el período</th><th class="r">Parte</th></tr></thead><tbody>${filasF}</tbody></table></details>
       <div class="hint" style="margin-top:10px">Anthropic no publica cuántos tokens trae el plan: la cuota semanal es una <b>estimación</b>. No incluye el uso de esta cuenta desde otros PC ni desde claude.ai, así que el total real puede ser mayor. La mayor parte de los tokens es «caché leída», que pesa mucho menos en la cuota; por eso conviene mirar también el equivalente en US$. Claude Code guarda solo los últimos 30 días de conversaciones.${gen ? " Datos de tokens al " + gen.replace(/\.$/, "") + "." : ""}</div>
     </div>`;
+}
+
+function modelosHtml(fil) {
+  const tot = {};
+  fil.forEach(x => Object.entries(x.mod).forEach(([f, y]) => { const t = (tot[f] ||= { tok: 0, usd: 0, n: 0, s: 0, dias: 0 }); t.tok += y.tok; t.usd += y.usd; t.n += y.n; t.s += y.s; t.dias++; }));
+  const fams = FAMS.filter(([f]) => tot[f]);
+  const U = fams.reduce((a, [f]) => a + tot[f].usd, 0) || 1, K = fams.reduce((a, [f]) => a + tot[f].tok, 0) || 1;
+  const barra = (k, T) => `<div class="stackh">${fams.map(([f, c]) => `<i style="width:${tot[f][k] / T * 100}%;background:${c}" data-tip="${f}: ${Math.round(tot[f][k] / T * 100)}%"></i>`).join("")}</div>`;
+  const leyenda = `<div class="legend">${FAMS.map(([f, c]) => `<i style="background:${c};width:12px"></i>${f}${tot[f] ? "" : " (sin uso)"}&nbsp;&nbsp;`).join("")}</div>`;
+  const maxD = Math.max(...fil.map(x => x.usd)) || 1;
+  const dias = `<div class="bars">${fil.map(x => `<div class="b" data-tip="${dayLabel(x.d)}\n${fams.filter(([f]) => x.mod[f]).map(([f]) => `${f}: ${Math.round(x.mod[f].usd / (x.usd || 1) * 100)}% · ${fmtTok(x.mod[f].tok)} · ${usd(x.mod[f].usd)}`).join("\n")}"><span>${x.usd ? Math.round((x.mod.Opus ? x.mod.Opus.usd : 0) / x.usd * 100) + "%" : ""}</span><div class="stackv" style="height:${x.usd / maxD * 100}%">${fams.slice().reverse().map(([f, c]) => x.mod[f] ? `<i style="flex:${x.mod[f].usd};background:${c}"></i>` : "").join("")}</div></div>`).join("")}</div>
+    <div class="xl">${fil.map(x => `<div>${dayLabel(x.d).slice(0, 3) + " " + x.d.slice(8)}</div>`).join("")}</div>`;
+  const filas = fams.map(([f, c]) => { const t = tot[f]; return `<tr><td><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c};margin-right:6px"></i>${f}</td><td class="r"><b>${Math.round(t.usd / U * 100)}%</b></td><td class="r">${Math.round(t.tok / K * 100)}%</td><td class="r">${fmtTok(t.tok)}</td><td class="r">${fmtTok(t.s)}</td><td class="r">${usd(t.usd)}</td><td class="r">${t.n ? usd(t.usd / t.n * 100) : "—"}</td><td class="r">${t.dias}</td></tr>`; }).join("");
+  return `<div class="panel"><h2>Uso por modelo</h2><div class="hint">Cuánto pesa cada modelo. El peso en la cuota se aproxima con el equivalente en US$ a precio de API (Opus cuesta más por token que Sonnet, y Sonnet más que Haiku). Fable se cuenta a precio de Opus.</div>
+    <div class="hint" style="margin:8px 0 2px">Peso en la cuota (US$ equivalente)</div>${barra("usd", U)}
+    <div class="hint" style="margin:8px 0 2px">Tokens</div>${barra("tok", K)}${leyenda}
+    <table><thead><tr><th>Modelo</th><th class="r">Peso en cuota</th><th class="r">Parte de tokens</th><th class="r">Tokens</th><th class="r">Salida</th><th class="r">Equiv. API</th><th class="r">US$ por 100 mensajes</th><th class="r">Días con uso</th></tr></thead><tbody>${filas}</tbody></table>
+    <h2 style="margin-top:16px">Por día</h2><div class="hint">Altura = equivalente en US$ del día; colores = parte de cada modelo. El número arriba es la parte de Opus. Pasa el mouse por una barra para ver el detalle.</div>${dias}</div>`;
 }
 
 const tip = document.getElementById("tip");
