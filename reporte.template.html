@@ -94,6 +94,27 @@
 <script>
 const RAW = /*DATA*/[];
 const GEN = /*GEN*/"";
+const TOK = /*TOKENS*/null;
+// US$ por millón de tokens (precio de la API, solo para comparar): entrada, escritura de caché, lectura de caché, salida
+const PRICE = m => /haiku/.test(m) ? [1, 1.25, 0.1, 5] : /sonnet/.test(m) ? [3, 3.75, 0.3, 15] : [5, 6.25, 0.5, 25];
+const fmtTok = v => v >= 1e9 ? (v / 1e9).toFixed(2).replace(".", ",") + " mil M" : v >= 1e6 ? (v / 1e6).toFixed(1).replace(".", ",") + " M" : v >= 1e3 ? Math.round(v / 1e3) + " mil" : String(Math.round(v));
+const usd = v => "US$" + (v >= 100 ? Math.round(v).toLocaleString("es-CL") : v.toFixed(2).replace(".", ","));
+function tokensPorDia(acc) {
+  if (!TOK) return null;
+  const dias = {}, fuentes = TOK.fuentes.filter(f => f.cuenta === acc);
+  fuentes.forEach(f => Object.entries(f.horas).forEach(([h, mods]) => {
+    const d = local(Date.parse(h + ":30:00Z") / 1000).day;
+    const x = (dias[d] ||= { e: 0, cw: 0, cr: 0, s: 0, usd: 0, por: {} });
+    Object.entries(mods).forEach(([m, v]) => {
+      const P = PRICE(m);
+      x.e += v[0]; x.cw += v[1]; x.cr += v[2]; x.s += v[3];
+      const c = (v[0] * P[0] + v[1] * P[1] + v[2] * P[2] + v[3] * P[3]) / 1e6;
+      x.usd += c; x.por[f.nombre] = (x.por[f.nombre] || 0) + v[0] + v[1] + v[2] + v[3];
+    });
+  }));
+  return { dias, fuentes };
+}
+const median = a => { const b = a.slice().sort((x, y) => x - y); return b.length ? (b.length % 2 ? b[(b.length - 1) / 2] : (b[b.length / 2 - 1] + b[b.length / 2]) / 2) : 0; };
 const TZ = "America/Santiago";
 const DOW = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
 const fmtParts = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23", weekday: "short" });
@@ -208,6 +229,38 @@ function render() {
     </div>
     <div class="panel"><h2>Cierre de cada semana</h2><div class="hint">Hasta qué % de la cuota llegó cada semana. La línea roja es el tope (100%).</div>${weekItems.length ? barChart(weekItems, { values: true, min: 100, limit: 100, limitText: "tope 100%" }) : `<div class="empty">Sin semanas en el período.</div>`}
       <details><summary>Ver tabla por día</summary><table><thead><tr><th>Día</th><th class="r">% gastado</th></tr></thead><tbody>${days.slice().reverse().map(d => `<tr><td>${dayLabel(d)}</td><td class="r">${pct(byDay[d])}</td></tr>`).join("")}</tbody></table></details>
+    </div>
+    ${tokensHtml(days, byDay)}`;
+}
+
+function tokensHtml(days, byDay) {
+  const T = tokensPorDia(state.acc);
+  if (!T || !T.fuentes.length) return `<div class="panel"><h2>Tokens por día</h2><div class="empty">No hay datos de tokens para esta cuenta (falta correr tokens.py).</div></div>`;
+  const fil = days.filter(d => T.dias[d]).map(d => ({ d, ...T.dias[d], tot: T.dias[d].e + T.dias[d].cw + T.dias[d].cr + T.dias[d].s, p: byDay[d] || 0 }));
+  if (!fil.length) return `<div class="panel"><h2>Tokens por día</h2><div class="empty">Sin tokens registrados en el período.</div></div>`;
+  const sum = k => fil.reduce((a, x) => a + x[k], 0);
+  const base = fil.filter(x => x.p >= 2 && x.tot > 0);
+  const tokPorPct = median(base.map(x => x.tot / x.p)), usdPorPct = median(base.map(x => x.usd / x.p));
+  const conUso = fil.filter(x => x.tot > 0).length;
+  const nombres = [...new Set(T.fuentes.map(f => f.nombre))];
+  const totF = Object.fromEntries(nombres.map(n => [n, fil.reduce((a, x) => a + (x.por[n] || 0), 0)]));
+  const totAll = sum("tot") || 1;
+  const filasF = T.fuentes.map(f => `<tr><td>${f.nombre}</td><td>${f.ok ? "OK" : "No respondió: " + (f.error || "")}</td><td class="r">${fmtTok(totF[f.nombre] || 0)}</td><td class="r">${Math.round((totF[f.nombre] || 0) / totAll * 100)}%</td></tr>`).join("");
+  const filas = fil.slice().reverse().map(x => `<tr data-tip="${Object.entries(x.por).sort((a, b) => b[1] - a[1]).map(([n, v]) => n + ": " + fmtTok(v)).join("\n")}"><td>${dayLabel(x.d)}</td><td class="r">${fmtTok(x.e)}</td><td class="r">${fmtTok(x.s)}</td><td class="r">${fmtTok(x.cw)}</td><td class="r">${fmtTok(x.cr)}</td><td class="r"><b>${fmtTok(x.tot)}</b></td><td class="r">${usd(x.usd)}</td><td class="r">${x.p ? pct(x.p) : "—"}</td><td class="r">${x.p >= 0.5 ? fmtTok(x.tot / x.p) : "—"}</td></tr>`).join("");
+  const gen = TOK.gen ? new Date(TOK.gen * 1000).toLocaleString("es-CL", { timeZone: TZ, dateStyle: "short", timeStyle: "short" }) : "";
+  return `
+    <div class="cards">
+      <div class="card"><div class="k">Tokens en el período</div><div class="v">${fmtTok(totAll)}</div><div class="n">${usd(sum("usd"))} a precio de API · ${conUso} días con uso</div></div>
+      <div class="card"><div class="k">Promedio por día con uso</div><div class="v">${fmtTok(totAll / conUso)}</div><div class="n">${usd(sum("usd") / conUso)} por día</div></div>
+      <div class="card"><div class="k">1% de la cuota equivale a</div><div class="v">${base.length ? fmtTok(tokPorPct) : "—"}</div><div class="n">${base.length ? "≈ " + usd(usdPorPct) + " · mediana de " + base.length + " días" : "faltan días con 2% o más"}</div></div>
+      <div class="card"><div class="k">Cuota semanal estimada (100%)</div><div class="v">${base.length ? fmtTok(tokPorPct * 100) : "—"}</div><div class="n">${base.length ? "≈ " + usd(usdPorPct * 100) + " a precio de API" : ""}</div></div>
+    </div>
+    <div class="panel"><h2>Tokens por día</h2><div class="hint">Suma de las conversaciones de Claude Code de esta cuenta en este PC y en los servidores. «Tokens por 1%» divide los tokens del día por el % que subió la cuota ese día. Pasa el mouse por una fila para ver de qué equipo salieron.</div>
+      <table><thead><tr><th>Día</th><th class="r">Entrada</th><th class="r">Salida</th><th class="r">Caché escrita</th><th class="r">Caché leída</th><th class="r">Total</th><th class="r">Equiv. API</th><th class="r">% cuota</th><th class="r">Tokens por 1%</th></tr></thead>
+      <tbody>${filas}</tbody>
+      <tfoot><tr><th>Total</th><th class="r">${fmtTok(sum("e"))}</th><th class="r">${fmtTok(sum("s"))}</th><th class="r">${fmtTok(sum("cw"))}</th><th class="r">${fmtTok(sum("cr"))}</th><th class="r">${fmtTok(totAll)}</th><th class="r">${usd(sum("usd"))}</th><th class="r">${pct(sum("p"))}</th><th></th></tr></tfoot></table>
+      <details><summary>De dónde salen los tokens</summary><table><thead><tr><th>Equipo</th><th>Estado</th><th class="r">Tokens en el período</th><th class="r">Parte</th></tr></thead><tbody>${filasF}</tbody></table></details>
+      <div class="hint" style="margin-top:10px">Anthropic no publica cuántos tokens trae el plan: la cuota semanal es una <b>estimación</b>. No incluye el uso de esta cuenta desde otros PC ni desde claude.ai, así que el total real puede ser mayor. La mayor parte de los tokens es «caché leída», que pesa mucho menos en la cuota; por eso conviene mirar también el equivalente en US$. Claude Code guarda solo los últimos 30 días de conversaciones.${gen ? " Datos de tokens al " + gen.replace(/\.$/, "") + "." : ""}</div>
     </div>`;
 }
 

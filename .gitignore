@@ -2,3 +2,6 @@
 .credentials.json
 historial.csv
 reporte.html
+tokens_fuentes.json
+tokens.json
+tokens.json.tmp

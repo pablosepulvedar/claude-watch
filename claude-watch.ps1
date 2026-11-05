@@ -204,7 +204,16 @@ function Write-Report {
         if ($sb.Length) { [void]$sb.Append(",") }
         [void]$sb.AppendFormat('[{0},"{1}","{2}",{3}]', $r.t, $r.cuenta, $r.semana, $r.pct)
     }
-    $html = [IO.File]::ReadAllText($tpl).Replace("/*DATA*/[]", "[" + $sb.ToString() + "]").Replace('/*GEN*/""', '"' + (Get-Date -Format "dd-MM-yyyy HH:mm") + '"')
+    # Tokens (tokens.py): se refrescan en segundo plano como máximo una vez por hora; el reporte usa lo último que haya
+    $tokJson = Join-Path $PSScriptRoot "tokens.json"
+    $tokPy = Join-Path $PSScriptRoot "tokens.py"
+    if ((Test-Path $tokPy) -and (Test-Path (Join-Path $PSScriptRoot "tokens_fuentes.json")) -and (-not (Test-Path $tokJson) -or (Get-Item $tokJson).LastWriteTime -lt (Get-Date).AddMinutes(-60))) {
+        if (-not ($script:tokProc -and -not $script:tokProc.HasExited)) {
+            try { $script:tokProc = Start-Process python -ArgumentList "`"$tokPy`"" -WindowStyle Hidden -PassThru } catch {}
+        }
+    }
+    $tok = if (Test-Path $tokJson) { [IO.File]::ReadAllText($tokJson) } else { "null" }
+    $html = [IO.File]::ReadAllText($tpl).Replace("/*DATA*/[]", "[" + $sb.ToString() + "]").Replace('/*GEN*/""', '"' + (Get-Date -Format "dd-MM-yyyy HH:mm") + '"').Replace("/*TOKENS*/null", $tok)
     [IO.File]::WriteAllText($ReportPath, $html, (New-Object System.Text.UTF8Encoding $false))
 }
 

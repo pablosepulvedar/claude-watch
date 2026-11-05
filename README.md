@@ -174,3 +174,18 @@ El script lee tu token OAuth desde `~/.claude/.credentials.json` **solo para aut
 ---
 
 Funciona en cualquier plan de Claude Code (Pro, Max, etc.) — los porcentajes y sub-límites se detectan automáticamente desde el endpoint oficial.
+
+## Tokens por día (opcional)
+
+`tokens.py` suma los tokens de las conversaciones de Claude Code (`~/.claude*/projects/**/*.jsonl`) de este PC y de servidores por SSH, y deja los totales por hora en `tokens.json`. El reporte los muestra al final, con la estimación de cuántos tokens equivale el 1% de la cuota semanal.
+
+Las fuentes van en `tokens_fuentes.json` (no se sube a git), por ejemplo:
+
+```json
+[
+  {"cuenta": "Trabajo", "nombre": "Este PC", "dir": "~/.claude-trabajo/projects"},
+  {"cuenta": "Trabajo", "nombre": "Servidor", "host": "usuario@servidor", "dir": "~/.claude/projects", "askpass": "C:\ruta\askpass.cmd"}
+]
+```
+
+Claude Watch lo corre en segundo plano como máximo una vez por hora. En el servidor solo se lee: se envía un script por SSH que devuelve totales, no el contenido de las conversaciones.
