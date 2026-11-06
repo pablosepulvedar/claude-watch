@@ -155,9 +155,9 @@ function Show-WeekForecast {
     $corto = & $ritmo ($nowT - 7 * 86400)
     $rate = @{ lab = 0.0; noche = 0.0; finde = 0.0 }
     $rate.lab = if ($null -ne $largo.r) { $largo.r } else { $Pct / [math]::Max($hElap, 1) }
-    $hor = if ($Horario) { " laboral" } else { "" }
-    $base = "ritmo {0} {1}: {2:0.0}%/h{3}" -f $largo.dias, $(if ($largo.dias -eq 1) { "día" } else { "días" }), $rate.lab, $hor
-    if ($null -ne $corto.r -and $largo.dias -gt 8) { $base += " · 7 días: {0:0.0}%/h" -f $corto.r }
+    $base = "ritmo histórico {0:0.0}%/h" -f $rate.lab
+    if ($null -ne $corto.r -and $largo.dias -gt 8) { $base += " vs 7 días {0:0.0}%/h" -f $corto.r }
+    if ($Horario) { $base += " (horario laboral)" }
 
     # Proyeccion por tramos de 10 minutos hasta el reset con el ritmo de cada tipo de hora
     $proj = $Pct; $hit = $null; $tcur = $Now
