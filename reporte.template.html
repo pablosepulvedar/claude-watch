@@ -219,7 +219,7 @@ function render() {
     days.forEach(d => { const w = d.slice(0, 4) + "-" + Math.floor((Date.parse(d) / 864e5 + 3) / 7); (wk[w] ||= { l: dayLabel(d), v: 0, n: 0 }); wk[w].v += byDay[d]; wk[w].n++; });
     dayItems = Object.values(wk).map(w => ({ l: w.l.slice(4), v: w.v, tip: `Semana desde ${w.l}\n${pct(w.v)} en total` }));
   } else {
-    dayItems = days.map(d => ({ l: dayLabel(d).slice(0, 3) + " " + d.slice(8), v: byDay[d], tip: `${dayLabel(d)}\n${pct(byDay[d])} de la cuota semanal` }));
+    dayItems = days.map(d => ({ l: dayLabel(d).slice(0, 3) + " " + d.slice(8) + (d === today ? " (hoy)" : ""), v: byDay[d], tip: `${dayLabel(d)}\n${pct(byDay[d])} de la cuota semanal${d === today ? "\nDía en curso: suma hasta ahora" : ""}` }));
   }
 
   const lvl = v => v <= 0 ? 0 : Math.min(6, 1 + Math.floor((v / hmax) * 5.999));
