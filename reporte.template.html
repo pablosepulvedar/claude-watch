@@ -100,7 +100,13 @@ const RAW = /*DATA*/[];
 const GEN = /*GEN*/"";
 const TOK = /*TOKENS*/null;
 // US$ por millón de tokens (precio de la API, solo para comparar): entrada, escritura de caché, lectura de caché, salida
-const PRICE = m => /haiku/.test(m) ? [1, 1.25, 0.1, 5] : /sonnet/.test(m) ? [3, 3.75, 0.3, 15] : [5, 6.25, 0.5, 25];
+const PRICE = m => /fable|mythos/.test(m) ? [10, 12.5, 0.25, 50]
+  : /opus-5-5/.test(m) ? [4, 5, 0.2, 20]
+  : /opus/.test(m) ? [5, 6.25, 0.5, 25]
+  : /sonnet-5/.test(m) ? [2, 2.5, 0.2, 10]
+  : /sonnet/.test(m) ? [3, 3.75, 0.3, 15]
+  : /haiku-5-5/.test(m) ? [0.1, 0.125, 0.01, 0.5]
+  : /haiku/.test(m) ? [1, 1.25, 0.1, 5] : [5, 6.25, 0.5, 25];
 const FAMS = [["Opus", "#2a78d6"], ["Sonnet", "#e0873a"], ["Haiku", "#2fa37a"], ["Fable", "#c04bb0"], ["Otro", "#8a8984"]];
 const FAM = m => /fable/.test(m) ? "Fable" : /opus/.test(m) ? "Opus" : /sonnet/.test(m) ? "Sonnet" : /haiku/.test(m) ? "Haiku" : "Otro";
 const fmtTok = v => v >= 1e9 ? (v / 1e9).toFixed(2).replace(".", ",") + " mil M" : v >= 1e6 ? (v / 1e6).toFixed(1).replace(".", ",") + " M" : v >= 1e3 ? Math.round(v / 1e3) + " mil" : String(Math.round(v));
@@ -285,7 +291,7 @@ function modelosHtml(fil) {
   const dias = `<div class="bars">${fil.map(x => `<div class="b" data-tip="${dayLabel(x.d)}\n${fams.filter(([f]) => x.mod[f]).map(([f]) => `${f}: ${Math.round(x.mod[f].usd / (x.usd || 1) * 100)}% · ${fmtTok(x.mod[f].tok)} · ${usd(x.mod[f].usd)}`).join("\n")}"><span>${x.usd ? Math.round((x.mod.Opus ? x.mod.Opus.usd : 0) / x.usd * 100) + "%" : ""}</span><div class="stackv" style="height:${x.usd / maxD * 100}%">${fams.slice().reverse().map(([f, c]) => x.mod[f] ? `<i style="flex:${x.mod[f].usd};background:${c}"></i>` : "").join("")}</div></div>`).join("")}</div>
     <div class="xl">${fil.map(x => `<div>${dayLabel(x.d).slice(0, 3) + " " + x.d.slice(8)}</div>`).join("")}</div>`;
   const filas = fams.map(([f, c]) => { const t = tot[f]; return `<tr><td><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c};margin-right:6px"></i>${f}</td><td class="r"><b>${Math.round(t.usd / U * 100)}%</b></td><td class="r">${Math.round(t.tok / K * 100)}%</td><td class="r">${fmtTok(t.tok)}</td><td class="r">${fmtTok(t.s)}</td><td class="r">${usd(t.usd)}</td><td class="r">${t.n ? usd(t.usd / t.n * 100) : "—"}</td><td class="r">${t.dias}</td></tr>`; }).join("");
-  return `<div class="panel"><h2>Uso por modelo</h2><div class="hint">Cuánto pesa cada modelo. El peso en la cuota se aproxima con el equivalente en US$ a precio de API (Opus cuesta más por token que Sonnet, y Sonnet más que Haiku). Fable se cuenta a precio de Opus.</div>
+  return `<div class="panel"><h2>Uso por modelo</h2><div class="hint">Cuánto pesa cada modelo. El peso en la cuota se aproxima con el equivalente en US$ a precio de API (Opus cuesta más por token que Sonnet, y Sonnet más que Haiku). Precios por modelo y versión (Opus 4.8 cuesta más que Opus 5.5).</div>
     <div class="hint" style="margin:8px 0 2px">Peso en la cuota (US$ equivalente)</div>${barra("usd", U)}
     <div class="hint" style="margin:8px 0 2px">Tokens</div>${barra("tok", K)}${leyenda}
     <table><thead><tr><th>Modelo</th><th class="r">Peso en cuota</th><th class="r">Parte de tokens</th><th class="r">Tokens</th><th class="r">Salida</th><th class="r">Equiv. API</th><th class="r">US$ por 100 mensajes</th><th class="r">Días con uso</th></tr></thead><tbody>${filas}</tbody></table>
