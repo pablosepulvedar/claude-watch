@@ -203,10 +203,12 @@ function Write-Report {
     # Genera reporte.html (graficos semanal/mensual/historico) desde historial.csv; se abre con la tecla I
     $tpl = $TemplatePath
     if (-not (Test-Path $tpl) -or -not (Test-Path $LogPath)) { return }
-    $last = @{}; $sb = New-Object System.Text.StringBuilder
+    $last = @{}; $lastT = @{}; $sb = New-Object System.Text.StringBuilder
     foreach ($r in (Import-Csv $LogPath -Header t, cuenta, semana, pct)) {
         $sig = $r.semana + "|" + $r.pct
-        if ($last[$r.cuenta] -eq $sig) { continue }
+        $gap = $lastT[$r.cuenta] -and ([long]$r.t - $lastT[$r.cuenta]) -gt 7200
+        $lastT[$r.cuenta] = [long]$r.t
+        if ($last[$r.cuenta] -eq $sig -and -not $gap) { continue }
         $last[$r.cuenta] = $sig
         if ($sb.Length) { [void]$sb.Append(",") }
         [void]$sb.AppendFormat('[{0},"{1}","{2}",{3}]', $r.t, $r.cuenta, $r.semana, $r.pct)
