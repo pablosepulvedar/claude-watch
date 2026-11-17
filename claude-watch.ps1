@@ -244,20 +244,15 @@ function Get-Usage {
 function Show-AccountUsage {
     param([string]$Label, [string]$CredPath, [datetimeoffset]$Now, $Horario)
 
-    Write-Host ("  Cuenta: {0}" -f $Label) -ForegroundColor Magenta
+    if (-not (Test-Path $CredPath)) { return }
 
-    if (-not (Test-Path $CredPath)) {
-        Write-Host "  (no configurada en esta maquina)" -ForegroundColor DarkGray
-        Write-Host ""
-        return
-    }
+    Write-Host ("  Cuenta: {0}" -f $Label) -ForegroundColor Magenta
 
     try {
         $u = Get-Usage -CredPath $CredPath
         $d = $u.data
 
         Write-Host ("  Plan: {0}  ({1})" -f $u.plan, $u.tier) -ForegroundColor DarkCyan
-        Write-Host ""
 
         # Sesion (5h)
         if ($d.five_hour) {
@@ -283,7 +278,6 @@ function Show-AccountUsage {
             } else {
                 Write-Host "  Sin sesion activa" -ForegroundColor Gray
             }
-            Write-Host ""
         }
 
         # Semana (7 dias) - todos los modelos
@@ -316,27 +310,23 @@ function Show-AccountUsage {
             Write-Host ("  Error leyendo /usage: {0}" -f $msg) -ForegroundColor Red
         }
     }
-    Write-Host ""
 }
 
 while ($true) {
     Clear-Host
     Write-Host ("  Claude Code Usage  [" + (Get-Date -Format "HH:mm:ss") + "]") -ForegroundColor Yellow
     Write-Host ("=" * 62) -ForegroundColor DarkGray
-    Write-Host ""
 
     # ----- Porcentajes REALES del plan (coinciden con /usage), por cuenta -----
     $now = [datetimeoffset]::UtcNow
-    for ($i = 0; $i -lt $Accounts.Count; $i++) {
+    $Activas = @($Accounts | Where-Object { Test-Path $_.CredPath })
+    for ($i = 0; $i -lt $Activas.Count; $i++) {
         # Pausa entre cuentas para no disparar 2 requests casi simultaneos al
         # mismo endpoint (algunos rate limits cortan por rafaga corta, no solo
         # por promedio por hora).
         if ($i -gt 0) { Start-Sleep -Seconds 5 }
-        Show-AccountUsage -Label $Accounts[$i].Label -CredPath $Accounts[$i].CredPath -Now $now -Horario $Accounts[$i].Horario
-        if ($i -lt $Accounts.Count - 1) {
-            Write-Host ("  " + ("-" * 60)) -ForegroundColor DarkGray
-            Write-Host ""
-        }
+        Show-AccountUsage -Label $Activas[$i].Label -CredPath $Activas[$i].CredPath -Now $now -Horario $Activas[$i].Horario
+        if ($i -lt $Activas.Count - 1) { Write-Host ("  " + ("-" * 60)) -ForegroundColor DarkGray }
     }
 
     # ----- Volumen / costo (ccusage) - SOLO informativo, equivalente API -----
