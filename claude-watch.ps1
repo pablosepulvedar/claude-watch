@@ -351,12 +351,6 @@ while ($true) {
     }
 
     try { Write-Report } catch {}
-    # Enlace clickeable (Ctrl+clic en Windows Terminal) al informe con graficos
-    $esc = [char]27
-    $st  = $esc + "\"
-    $url = "file:///" + $ReportPath.Replace([string][char]92, "/")
-    Write-Host ""
-    Write-Host ("  Informe con gráficos: tecla I  o  Ctrl+clic en {0}]8;;{1}{2}abrir informe{0}]8;;{2}" -f $esc, $url, $st) -ForegroundColor Cyan
     Write-Host ("=" * 62) -ForegroundColor DarkGray
 
     $deadline = (Get-Date).AddSeconds($RefreshSeconds)
