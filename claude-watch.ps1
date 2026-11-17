@@ -36,6 +36,9 @@ $Accounts = @(
     # Sin Horario todas las horas son iguales.
     @{ Label = "Trabajo";  CredPath = Join-Path $env:USERPROFILE ".claude-trabajo\.credentials.json"; Horario = @{ Dias = 1..5; Desde = 8; Hasta = 17.5; HastaViernes = 16 } }
 )
+# Cuenta solo de este PC: aparece unicamente si existen sus credenciales (en otro PC no se muestra).
+$GreenfieldCred = Join-Path $env:USERPROFILE ".claude-greenfield\.credentials.json"
+if (Test-Path $GreenfieldCred) { $Accounts += @{ Label = "Greenfield"; CredPath = $GreenfieldCred } }
 # Historial local de % semanal (una fila por refresco y cuenta) para calcular el ritmo de las ultimas 24h.
 # ponytail: crece ~1 MB/ano; borrar el archivo si molesta, solo se vuelve al promedio de la semana.
 $LogPath = Join-Path $PSScriptRoot "historial.csv"
