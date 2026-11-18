@@ -255,7 +255,7 @@ function Show-AccountUsage {
         Write-Host ("  Plan: {0}  ({1})" -f $u.plan, $u.tier) -ForegroundColor DarkCyan
 
         # Sesion (5h)
-        if ($d.five_hour) {
+        if ($d.five_hour -and $d.five_hour.resets_at -and [double]$d.five_hour.utilization -gt 0) {
             $p5   = [double]$d.five_hour.utilization
             $rst5 = Get-SantiagoTime $d.five_hour.resets_at
             Write-Host "  Sesion (5h)" -ForegroundColor Cyan
