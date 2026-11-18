@@ -255,9 +255,13 @@ function Show-AccountUsage {
         Write-Host ("  Plan: {0}  ({1})" -f $u.plan, $u.tier) -ForegroundColor DarkCyan
 
         # Sesion (5h)
-        if ($d.five_hour -and $d.five_hour.resets_at -and [double]$d.five_hour.utilization -gt 0) {
-            $p5   = [double]$d.five_hour.utilization
-            $rst5 = Get-SantiagoTime $d.five_hour.resets_at
+        $tier5 = [string]$u.tier
+        $verSesion = if ($tier5 -match 'max_20x') { $false }
+                     elseif ($u.plan -eq 'pro' -or $tier5 -match 'max_5x') { $true }
+                     else { [bool]($d.five_hour -and $d.five_hour.resets_at -and [double]$d.five_hour.utilization -gt 0) }
+        if ($verSesion) {
+            $p5   = if ($d.five_hour) { [double]$d.five_hour.utilization } else { 0 }
+            $rst5 = if ($d.five_hour -and $d.five_hour.resets_at) { Get-SantiagoTime $d.five_hour.resets_at } else { $null }
             Write-Host "  Sesion (5h)" -ForegroundColor Cyan
             Write-Host "  Uso       " -NoNewline
             Draw-Bar -pct $p5 -color (Get-BarColor $p5)
