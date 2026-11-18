@@ -256,8 +256,7 @@ function Show-AccountUsage {
 
         # Sesion (5h)
         $tier5 = [string]$u.tier
-        $verSesion = if ($tier5 -match 'max_20x') { $false }
-                     elseif ($u.plan -eq 'pro' -or $tier5 -match 'max_5x') { $true }
+        $verSesion = if ($u.plan -eq 'pro' -or $tier5 -match 'max_5x') { $true }
                      else { [bool]($d.five_hour -and $d.five_hour.resets_at -and [double]$d.five_hour.utilization -gt 0) }
         if ($verSesion) {
             $p5   = if ($d.five_hour) { [double]$d.five_hour.utilization } else { 0 }
