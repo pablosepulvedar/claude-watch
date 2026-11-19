@@ -91,6 +91,7 @@
   <div class="filters">
     <div class="seg" id="acc"></div>
     <div class="seg" id="per"></div>
+    <div class="seg"><button id="rec" title="Recarga el informe y mantiene los filtros">&#8635; Recargar</button></div>
   </div>
   <div id="out"></div>
 </div>
@@ -141,8 +142,15 @@ const pct = v => (v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(".", ",")) + "%"
 const dayLabel = d => { const [y, m, dd] = d.split("-"); const w = DOW[(new Date(Date.UTC(y, m - 1, dd)).getUTCDay() + 6) % 7]; return `${w} ${dd}/${m}`; };
 
 const accounts = [...new Set(RAW.map(r => r[1]))];
-const state = { acc: accounts.includes("Trabajo") ? "Trabajo" : accounts[0], per: "mes" };
 const PERIODS = [["semana", "Últimos 7 días", 7], ["mes", "Últimos 30 días", 30], ["hist", "Histórico", null]];
+const FKEY = "claudewatch.filtros";
+let saved = {};
+try { saved = JSON.parse(localStorage.getItem(FKEY)) || {}; } catch (e) {}
+const state = {
+  acc: accounts.includes(saved.acc) ? saved.acc : accounts.includes("Trabajo") ? "Trabajo" : accounts[0],
+  per: PERIODS.some(p => p[0] === saved.per) ? saved.per : "mes"
+};
+document.getElementById("rec").onclick = () => location.reload();
 
 function events(acc) {
   const rows = RAW.filter(r => r[1] === acc), ev = [];
@@ -164,7 +172,7 @@ function daysBetween(a, b) {
 
 function seg(el, items, key) {
   el.innerHTML = items.map(([v, l]) => `<button data-v="${v}" aria-pressed="${state[key] === v}">${l}</button>`).join("");
-  el.onclick = e => { const v = e.target.dataset.v; if (v) { state[key] = v; render(); } };
+  el.onclick = e => { const v = e.target.dataset.v; if (v) { state[key] = v; try { localStorage.setItem(FKEY, JSON.stringify(state)); } catch (x) {} render(); } };
 }
 
 function barChart(items, opts = {}) {
